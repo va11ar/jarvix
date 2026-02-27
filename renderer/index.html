@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>JARVIX</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="app">
+
+    <!-- ══════════════════════════════════════════════
+         TITLEBAR
+    ══════════════════════════════════════════════════ -->
+    <div id="titlebar">
+      <div class="tb-logo">
+        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <circle cx="12" cy="12" r="9" stroke="#6b9ab8" stroke-width="1.5"/>
+          <circle cx="12" cy="12" r="4" fill="#6b9ab8" opacity="0.4"/>
+          <circle cx="12" cy="12" r="1.5" fill="#6b9ab8"/>
+          <line x1="12" y1="3" x2="12" y2="7" stroke="#6b9ab8" stroke-width="1.5"/>
+          <line x1="12" y1="17" x2="12" y2="21" stroke="#6b9ab8" stroke-width="1.5"/>
+          <line x1="3" y1="12" x2="7" y2="12" stroke="#6b9ab8" stroke-width="1.5"/>
+          <line x1="17" y1="12" x2="21" y2="12" stroke="#6b9ab8" stroke-width="1.5"/>
+        </svg>
+        <span class="tb-logo-text">JARVIX</span>
+      </div>
+
+      <div class="tb-project" id="tb-project">
+        <span id="tb-project-name">No project</span>
+      </div>
+
+      <div style="flex:1;-webkit-app-region:drag;"></div>
+
+      <div class="tb-controls">
+        <div class="tb-pill idle" id="status-pill">Idle</div>
+        <button class="tb-btn pause" id="btn-pause" data-tip="Pause" title="" aria-label="Pause">
+          <span id="pause-icon">⏸</span>
+        </button>
+        <button class="tb-btn abort" id="btn-abort" data-tip="Abort" title="" aria-label="Abort">
+          ■
+        </button>
+      </div>
+
+      <div style="flex:1;-webkit-app-region:drag;"></div>
+
+      <div class="tb-wincontrols">
+        <button class="wc-btn" id="btn-minimize" title="Minimize">─</button>
+        <button class="wc-btn" id="btn-maximize" title="Maximize">□</button>
+        <button class="wc-btn close" id="btn-close" title="Close">✕</button>
+      </div>
+    </div>
+
+    <!-- ══════════════════════════════════════════════
+         BRIEF BAR
+    ══════════════════════════════════════════════════ -->
+    <div id="briefbar">
+      <span id="brief-text">No project brief loaded</span>
+    </div>
+
+    <!-- ══════════════════════════════════════════════
+         MAIN AREA
+    ══════════════════════════════════════════════════ -->
+    <div id="main">
+
+      <!-- ── COL 1: AGENTS ── -->
+      <div id="col-agents">
+        <div class="col-header">Agents</div>
+
+        <div id="agent-pipeline-list">
+          <div class="section-label">Pipeline</div>
+          <div id="pipeline-agents-list"></div>
+
+          <div class="divider-h"></div>
+          <div class="section-label-row">
+            <div class="section-label">Library</div>
+            <button class="refresh-btn" id="btn-refresh-agents" title="Refresh agents list">⟳</button>
+          </div>
+          <div id="library-agents-list"></div>
+        </div>
+
+        <div id="pipeline-controls">
+          <button class="pipe-btn" id="btn-create-agent">Create Agent</button>
+          <button class="pipe-btn" id="btn-add-agent">Add Agent</button>
+          <button class="pipe-btn" id="btn-remove-agent" disabled>Remove Agent</button>
+          <button class="pipe-btn" id="btn-reorder" disabled>Reorder</button>
+          <button class="pipe-btn" id="btn-reroute" disabled>Reroute</button>
+          <button class="pipe-btn" id="btn-skip-next" disabled>Skip Next</button>
+        </div>
+      </div>
+
+      <!-- ── COL 2: CANVAS ── -->
+      <div id="col-canvas">
+        <div id="canvas-inner">
+          <div id="pipeline-canvas"></div>
+        </div>
+      </div>
+
+      <!-- ── COL 3: DETAIL ── -->
+      <div id="col-detail">
+        <div id="agent-detail-header">
+          <div class="detail-agent-name" id="detail-agent-name">No agent selected</div>
+          <div class="meta-grid">
+            <div class="meta-key">Status</div>
+            <div class="meta-val" id="detail-status">—</div>
+            <div class="meta-key">Elapsed</div>
+            <div class="meta-val" id="detail-elapsed">—</div>
+            <div class="meta-key">Timeout</div>
+            <div class="meta-val" id="detail-timeout">—</div>
+            <div class="meta-key">Reads</div>
+            <div class="meta-val" id="detail-reads">—</div>
+            <div class="meta-key">Output</div>
+            <div class="meta-val" id="detail-output">—</div>
+          </div>
+        </div>
+
+        <div class="progress-section">
+          <div class="progress-label">PIPELINE PROGRESS</div>
+          <div class="progress-track">
+            <div class="progress-fill" id="progress-fill" style="width: 0%"></div>
+          </div>
+          <div class="progress-text" id="progress-text">Step 0 of 0</div>
+        </div>
+
+        <div class="revision-section hidden" id="revision-section">
+          <div class="progress-label">REVISION LOOP</div>
+          <div class="pips" id="revision-pips"></div>
+          <div class="progress-text" id="revision-text">0 / 0</div>
+        </div>
+
+        <div id="agent-output">
+          <div class="output-placeholder">Select an agent to view output</div>
+        </div>
+
+        <div id="agent-controls">
+          <button class="agent-btn primary hidden" id="btn-continue">Continue</button>
+          <button class="agent-btn" id="btn-edit-output" disabled>Edit Output</button>
+          <button class="agent-btn" id="btn-interrupt" disabled>Interrupt</button>
+          <button class="agent-btn danger hidden" id="btn-kill-agent">Kill Agent</button>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- ══════════════════════════════════════════════
+         ACTIVITY LOG
+    ══════════════════════════════════════════════════ -->
+    <div id="activity-log">
+      <div id="log-header">
+        <span class="log-title">ACTIVITY LOG</span>
+        <button class="log-clear-btn" id="btn-clear-log">Clear</button>
+      </div>
+      <div id="log-lines"></div>
+    </div>
+
+    <!-- ══════════════════════════════════════════════
+         STATUS BAR
+    ══════════════════════════════════════════════════ -->
+    <div id="statusbar">
+      <div class="sb-seg">
+        <span class="sb-label">Qwen CLI:</span>
+        <span class="sb-val" id="sb-qwen-status">Not connected</span>
+      </div>
+      <div class="sb-seg">
+        <span class="sb-label">Agents:</span>
+        <span class="sb-val" id="sb-agents-count">0</span>
+      </div>
+      <div class="sb-seg">
+        <span class="sb-label">Projects:</span>
+        <span class="sb-val" id="sb-projects-count">0</span>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ══════════════════════════════════════════════
+       DIALOGS
+  ══════════════════════════════════════════════════ -->
+
+  <!-- New Project Dialog -->
+  <div class="overlay hidden" id="dialog-new-project">
+    <div class="dialog">
+      <div class="dialog-header">
+        <div class="dialog-title">New Project</div>
+        <div class="dialog-subtitle" id="new-project-subtitle">Step 1 of 4 — Name & Location</div>
+      </div>
+
+      <div class="step-indicator">
+        <div class="step-pip active" id="new-project-pip-1"></div>
+        <div class="step-pip pending" id="new-project-pip-2"></div>
+        <div class="step-pip pending" id="new-project-pip-3"></div>
+        <div class="step-pip pending" id="new-project-pip-4"></div>
+      </div>
+
+      <div class="dialog-body">
+        <!-- Step 1: Name & Location -->
+        <div id="dialog-step-1">
+          <label class="field-label">Project name</label>
+          <input class="dialog-input" id="new-project-name" type="text" placeholder="MyProject">
+
+          <label class="field-label">Location</label>
+          <div class="dialog-row">
+            <input class="dialog-input" id="new-project-path" type="text" readonly placeholder="Choose folder…">
+            <button class="dialog-btn-sm" id="btn-pick-folder">Browse…</button>
+          </div>
+
+          <label class="field-label">Project will be created at</label>
+          <div class="path-preview" id="new-project-path-preview">…</div>
+
+          <label class="field-label">Project brief</label>
+          <textarea class="dialog-input" id="new-project-brief" rows="4" placeholder="Describe what this project is about..."></textarea>
+          <div class="field-hint">This brief will be used as context for the agents.</div>
+        </div>
+
+        <!-- Step 2: Stack Selection -->
+        <div id="dialog-step-2" class="hidden">
+          <span class="field-label">Project stack</span>
+          <div class="field-hint">Select all that apply. JARVIX will generate a safe command whitelist for each selected stack.</div>
+          <div class="stack-grid" id="stack-picker-list"></div>
+          <div class="field-hint" style="margin-top:10px;">Git commands are included for all projects regardless of selection.</div>
+        </div>
+
+        <!-- Step 3: Command Whitelist -->
+        <div id="dialog-step-3" class="hidden">
+          <div class="field-hint" style="margin-top:0;">Review and edit the auto-approved shell commands for this project. Agents can run these without asking. You can add, edit, or remove rows.</div>
+          <div class="command-section-label">Allowed commands</div>
+          <div class="command-list" id="allowed-commands-list"></div>
+          <button class="btn-add-command" id="btn-add-command">+ Add command</button>
+          <div class="command-section-label">Always blocked — cannot be changed</div>
+          <div class="command-list" id="denied-commands-list"></div>
+        </div>
+
+        <!-- Step 4: Agent Selection -->
+        <div id="dialog-step-4" class="hidden">
+          <div class="field-hint" style="margin-top:0;">Select agents to include in this pipeline. Toggle to add, then drag or use the arrows to set the execution order.</div>
+          <div class="command-section-label">Agent library</div>
+          <div class="agent-pick-list" id="agent-picker-list"></div>
+          <button class="btn-add-command" id="btn-dialog-create-agent" style="margin-top:8px;">+ Create new agent</button>
+          <div class="order-section-label">Pipeline order</div>
+          <div class="order-list" id="agent-order-list"></div>
+        </div>
+      </div>
+
+      <div class="dialog-footer">
+        <div class="dialog-footer-left" id="new-project-footer-status"></div>
+        <button class="footer-btn" id="btn-new-project-cancel">Cancel</button>
+        <button class="footer-btn" id="btn-new-project-back" disabled>Back</button>
+        <button class="footer-btn primary" id="btn-new-project-next">Next</button>
+        <button class="footer-btn primary hidden" id="btn-new-project-create">Create</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Welcome Dialog (shown when no project is open) -->
+  <div class="overlay hidden" id="dialog-welcome">
+    <div class="dialog welcome-dialog">
+      <div class="dialog-header">
+        <div class="dialog-title">Welcome to JARVIX</div>
+      </div>
+      <div class="dialog-body" style="text-align:center;padding:30px 20px;">
+        <p style="color:var(--text-dim);margin-bottom:20px;">Get started by creating a new project or opening an existing one.</p>
+        <div style="display:flex;gap:10px;justify-content:center;">
+          <button class="footer-btn primary" id="btn-welcome-new">New Project</button>
+          <button class="footer-btn" id="btn-welcome-open">Open Project</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- First Launch Dialog (shown only on first launch) -->
+  <div class="overlay hidden" id="dialog-first-launch">
+    <div class="dialog" style="width:520px;">
+      <div class="dialog-header">
+        <div class="dialog-title">Welcome to JARVIX</div>
+      </div>
+      <div class="dialog-body" style="padding:20px 16px;">
+        <p style="color:var(--text);margin-bottom:12px;font-size:13px;">
+          This appears to be the first time you've launched JARVIX.
+        </p>
+        <p style="color:var(--text-dim);margin-bottom:16px;line-height:1.6;">
+          JARVIX orchestrates a sequential pipeline of AI coding agents to execute a software development lifecycle. 
+          Each agent is a specialized role (Architect, Programmer, Reviewer, etc.) that reads context files, performs its task, 
+          and writes output to a shared project folder.
+        </p>
+        <p style="color:var(--text-dim);margin-bottom:16px;line-height:1.6;">
+          Before creating a project, you'll need at least one agent in your library. Let's start by creating an agent.
+        </p>
+        <p style="color:var(--text-faint);font-size:10px;margin-bottom:8px;">
+          A boilerplate agent file will be created and opened in your default editor. The file includes comments explaining each section.
+        </p>
+      </div>
+      <div class="dialog-footer">
+        <button class="footer-btn" id="btn-first-launch-cancel">Cancel</button>
+        <button class="footer-btn primary" id="btn-first-launch-create">Create Agent</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Add Agent Dialog -->
+  <div class="overlay hidden" id="dialog-add-agent">
+    <div class="dialog" style="width:480px;">
+      <div class="dialog-header">
+        <div class="dialog-title">Add Agent to Pipeline</div>
+      </div>
+      <div class="dialog-body" style="padding:16px;">
+        <p style="color:var(--text-dim);margin-bottom:12px;font-size:11px;">
+          Select an agent from your library to add to the pipeline.
+        </p>
+        <div id="add-agent-list" style="max-height:300px;overflow-y:auto;"></div>
+      </div>
+      <div class="dialog-footer">
+        <button class="footer-btn" id="btn-add-agent-cancel">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Edit Warning Dialog -->
+  <div class="overlay hidden" id="dialog-edit-warning">
+    <div class="dialog" style="width:420px;">
+      <div class="dialog-header">
+        <div class="dialog-title">Agent File Changed</div>
+      </div>
+      <div class="dialog-body" style="padding:16px;">
+        <p style="color:var(--text-dim);margin-bottom:12px;">
+          The agent file has been modified outside the application.
+        </p>
+        <p style="color:var(--text-faint);font-size:10px;margin-bottom:16px;">
+          This affects the following projects: <span id="edit-warning-projects"></span>
+        </p>
+        <p style="color:var(--text-dim);font-size:10px;margin-bottom:16px;">
+          Cancelling will restore the agent file to its previous state. Any edits you made will be lost.
+        </p>
+      </div>
+      <div class="dialog-footer">
+        <button class="footer-btn" id="btn-edit-cancel-changes">Cancel Changes</button>
+        <button class="footer-btn primary" id="btn-edit-confirm-changes">Confirm Changes</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="renderer.js"></script>
+</body>
+</html>

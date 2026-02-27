@@ -1,0 +1,1283 @@
+// ═══════════════════════════════════════════════════════════════════════════
+// JARVIX Renderer — All UI logic, state object, IPC event handlers
+// ═══════════════════════════════════════════════════════════════════════════
+
+'use strict'
+
+// ─── State Object — Single Source of Truth ──────────────────────────────────
+const state = {
+  // App state
+  currentProject: null,
+  pipelineState: 'idle',
+  agents: [],
+  projects: [],
+
+  // Pipeline state
+  pipelineSteps: [],
+  currentStepIndex: -1,
+  selectedAgentId: null,
+  selectedNodeIndex: -1,
+
+  // Agent output
+  agentOutputs: new Map(), // agentId -> content
+
+  // Activity log
+  logEntries: [],
+
+  // New Project Dialog state
+  npStep: 1,
+  npAllowedCommands: new Set(),
+  npSelectedAgents: [],
+  npDragSrc: null,
+  npTotalAgents: 0,
+
+  // Edit warning dialog state
+  editingAgentId: null,
+}
+
+const NP_STEP_SUBTITLES = [
+  'Step 1 of 4 — Name & Location',
+  'Step 2 of 4 — Project Stack',
+  'Step 3 of 4 — Command Whitelist',
+  'Step 4 of 4 — Select Agents',
+]
+
+// ─── Initialization ─────────────────────────────────────────────────────────
+
+document.addEventListener('DOMContentLoaded', async () => {
+  wireEventListeners()
+  wireNewProjectDialog()
+  await loadInitialData()
+  setupIPCListeners()
+})
+
+async function loadInitialData() {
+  try {
+    const [agents, projects, firstLaunchResult] = await Promise.all([
+      window.api.listAgents(),
+      window.api.listProjects(),
+      window.api.checkFirstLaunch(),
+    ])
+    state.agents = agents || []
+    state.projects = projects || []
+    updateStatusBar()
+
+    // Show first-launch dialog if this is the first launch
+    if (firstLaunchResult?.isFirst) {
+      showDialog('dialog-first-launch')
+    } else if (!state.currentProject) {
+      // Show welcome dialog if no project is open (not first launch)
+      showDialog('dialog-welcome')
+    }
+  } catch (e) {
+    appendLogLine('Failed to load initial data: ' + e.message, 'error')
+  }
+}
+
+function setupIPCListeners() {
+  window.api.onPipelineStatus((data) => {
+    handlePipelineStatus(data)
+  })
+
+  window.api.onAgentDefinitionChanged((data) => {
+    handleAgentDefinitionChanged(data)
+  })
+
+  window.api.onIncompleteRunDetected((data) => {
+    handleIncompleteRunDetected(data)
+  })
+
+  window.api.onAuthInvalid((data) => {
+    appendLogLine('Qwen CLI authentication not configured. Please set up ~/.qwen/settings.json', 'error')
+  })
+
+  window.api.onWindowFocus(() => {
+    handleWindowFocus()
+  })
+}
+
+// ─── Event Listeners ────────────────────────────────────────────────────────
+
+function wireEventListeners() {
+  // Window controls
+  document.getElementById('btn-minimize').addEventListener('click', () => window.api.minimizeWindow())
+  document.getElementById('btn-maximize').addEventListener('click', () => window.api.maximizeWindow())
+  document.getElementById('btn-close').addEventListener('click', () => window.api.closeWindow())
+
+  // Pipeline controls
+  document.getElementById('btn-pause').addEventListener('click', togglePause)
+  document.getElementById('btn-abort').addEventListener('click', handleAbort)
+
+  // Agent controls
+  document.getElementById('btn-continue').addEventListener('click', handleContinue)
+  document.getElementById('btn-edit-output').addEventListener('click', handleEditOutput)
+  document.getElementById('btn-interrupt').addEventListener('click', handleInterrupt)
+  document.getElementById('btn-kill-agent').addEventListener('click', handleKillAgent)
+
+  // Activity log
+  document.getElementById('btn-clear-log').addEventListener('click', clearLog)
+
+  // Pipeline structure buttons
+  document.getElementById('btn-add-agent').addEventListener('click', openAddAgentDialog)
+  document.getElementById('btn-remove-agent').addEventListener('click', () => appendLogLine('Remove Agent not implemented', 'warn'))
+  document.getElementById('btn-reorder').addEventListener('click', () => appendLogLine('Reorder not implemented', 'warn'))
+  document.getElementById('btn-reroute').addEventListener('click', () => appendLogLine('Reroute not implemented', 'warn'))
+  document.getElementById('btn-skip-next').addEventListener('click', () => appendLogLine('Skip Next not implemented', 'warn'))
+
+  // Add Agent dialog cancel button
+  document.getElementById('btn-add-agent-cancel').addEventListener('click', () => {
+    hideDialog('dialog-add-agent')
+  })
+
+  // Create Agent button (sidebar)
+  document.getElementById('btn-create-agent').addEventListener('click', async () => {
+    try {
+      const result = await window.api.createBoilerplateAgent()
+      if (result.error) {
+        appendLogLine('Failed to create agent: ' + result.error, 'error')
+        return
+      }
+      appendLogLine('Agent created and opened in editor', 'ok')
+      // Reload agents list
+      state.agents = await window.api.listAgents()
+      renderLibraryAgents()
+    } catch (e) {
+      appendLogLine('Failed to create agent: ' + e.message, 'error')
+    }
+  })
+
+  // Refresh agents button
+  document.getElementById('btn-refresh-agents').addEventListener('click', async () => {
+    try {
+      state.agents = await window.api.listAgents()
+      renderLibraryAgents()
+      appendLogLine('Agents list refreshed', 'info')
+    } catch (e) {
+      appendLogLine('Failed to refresh agents: ' + e.message, 'error')
+    }
+  })
+
+  // Welcome dialog
+  document.getElementById('btn-welcome-new').addEventListener('click', () => {
+    hideDialog('dialog-welcome')
+    openNewProjectDialog()
+  })
+  document.getElementById('btn-welcome-open').addEventListener('click', async () => {
+    hideDialog('dialog-welcome')
+    await openProjectDialog()
+  })
+
+  // First-launch dialog
+  document.getElementById('btn-first-launch-create').addEventListener('click', async () => {
+    try {
+      const result = await window.api.createBoilerplateAgent()
+      if (result.error) {
+        appendLogLine('Failed to create boilerplate agent: ' + result.error, 'error')
+        return
+      }
+      // Mark first launch as done
+      await window.api.markFirstLaunchDone()
+      hideDialog('dialog-first-launch')
+      appendLogLine('Boilerplate agent created and opened in editor', 'ok')
+      // After creating agent, show new project dialog
+      openNewProjectDialog()
+    } catch (e) {
+      appendLogLine('Failed to create boilerplate agent: ' + e.message, 'error')
+    }
+  })
+
+  document.getElementById('btn-first-launch-cancel').addEventListener('click', async () => {
+    // Mark first launch as done even if user cancels
+    await window.api.markFirstLaunchDone()
+    hideDialog('dialog-first-launch')
+    // Show new project dialog anyway - user can create project without agents
+    openNewProjectDialog()
+  })
+
+  // Keyboard shortcuts
+  document.addEventListener('keydown', async (e) => {
+    const isCtrl = e.ctrlKey || e.metaKey
+    if (!isCtrl) return
+
+    // Don't trigger shortcuts when typing in an input field
+    const tag = e.target.tagName.toLowerCase()
+    if (tag === 'input' || tag === 'textarea' || e.target.isContentEditable) return
+
+    if (e.key === 'n') {
+      e.preventDefault()
+      // Check if pipeline is active
+      if (state.pipelineState === 'running' || state.pipelineState === 'paused') {
+        appendLogLine('Cannot create new project while pipeline is active. Stop the pipeline first.', 'warn')
+        return
+      }
+      openNewProjectDialog()
+    } else if (e.key === 'o') {
+      e.preventDefault()
+      // Check if pipeline is active
+      if (state.pipelineState === 'running' || state.pipelineState === 'paused') {
+        appendLogLine('Cannot open another project while pipeline is active. Stop the pipeline first.', 'warn')
+        return
+      }
+      await openProjectDialog()
+    }
+  })
+}
+
+// ─── Pipeline Status Handler ────────────────────────────────────────────────
+
+function handlePipelineStatus(data) {
+  state.pipelineState = data.state
+  state.pipelineSteps = data.steps || []
+  state.currentStepIndex = data.currentStepIndex
+
+  updateTitlebarStatus()
+  renderPipelineAgents()
+  renderPipelineCanvas()
+  updateDetailPanel()
+  updateAgentControls()
+}
+
+// ─── Agent Definition Changed Handler ───────────────────────────────────────
+
+async function handleAgentDefinitionChanged(data) {
+  const { agentId } = data
+  // Reload agents list
+  try {
+    state.agents = await window.api.listAgents()
+    renderLibraryAgents()
+
+    // Show edit warning dialog
+    const projects = state.projects.filter(p =>
+      p.steps && p.steps.some(s => s.agent_id === agentId)
+    )
+    document.getElementById('edit-warning-projects').textContent = projects.map(p => p.name).join(', ')
+    state.editingAgentId = agentId
+    showDialog('dialog-edit-warning')
+  } catch (e) {
+    appendLogLine('Failed to reload agents: ' + e.message, 'error')
+  }
+}
+
+// ─── Incomplete Run Detected Handler ────────────────────────────────────────
+
+function handleIncompleteRunDetected(data) {
+  const { projectPath, projectName, incompleteStep } = data
+  appendLogLine(`Incomplete run detected in ${projectName}: ${incompleteStep.agent_name || 'Unknown agent'}`, 'warn')
+  // Could show a resume dialog here
+}
+
+// ─── Window Focus Handler ───────────────────────────────────────────────────
+
+async function handleWindowFocus() {
+  // Check for agent file changes when window regains focus
+  if (state.editingAgentId) {
+    try {
+      const result = await window.api.checkAgentChanges(state.editingAgentId)
+      if (result.changed) {
+        // Trigger the edit warning flow
+        await handleAgentDefinitionChanged({ agentId: state.editingAgentId })
+      }
+    } catch (e) {
+      // Ignore errors
+    }
+  }
+}
+
+// ─── Titlebar & Status Updates ──────────────────────────────────────────────
+
+function updateTitlebarStatus() {
+  const pill = document.getElementById('status-pill')
+  const pauseBtn = document.getElementById('btn-pause')
+  const pauseIcon = document.getElementById('pause-icon')
+
+  pill.className = 'tb-pill ' + state.pipelineState
+
+  const statusText = state.pipelineState.charAt(0).toUpperCase() + state.pipelineState.slice(1)
+  pill.textContent = statusText
+
+  if (state.pipelineState === 'running') {
+    pauseIcon.textContent = '⏸'
+    pauseBtn.classList.remove('paused')
+  } else if (state.pipelineState === 'paused') {
+    pauseIcon.textContent = '▶'
+    pauseBtn.classList.add('paused')
+  } else {
+    pauseIcon.textContent = '⏸'
+    pauseBtn.classList.remove('paused')
+  }
+}
+
+function updateStatusBar() {
+  document.getElementById('sb-agents-count').textContent = state.agents.length
+  document.getElementById('sb-projects-count').textContent = state.projects.length
+}
+
+// ─── Pipeline Rendering ─────────────────────────────────────────────────────
+
+function renderPipelineAgents() {
+  const list = document.getElementById('pipeline-agents-list')
+  list.innerHTML = ''
+
+  // Show empty state if no agents in pipeline
+  if (state.pipelineSteps.length === 0) {
+    list.innerHTML = `
+      <div class="pipeline-agents-empty">
+        <div class="pipeline-agents-empty-text">No agents in pipeline</div>
+      </div>
+    `
+    // Disable pipeline controls
+    setPipelineControlsDisabled(true)
+    return
+  }
+
+  state.pipelineSteps.forEach((step, index) => {
+    const agentName = step.agent_name || 'Unknown'
+    const item = document.createElement('div')
+    item.className = 'agent-item'
+    item.dataset.agentId = step.agent_id
+    item.dataset.index = index
+
+    // Determine state class
+    if (index < state.currentStepIndex) {
+      item.classList.add('complete')
+    } else if (index === state.currentStepIndex) {
+      if (state.pipelineState === 'running') {
+        item.classList.add('running')
+      } else if (state.pipelineState === 'error') {
+        item.classList.add('error')
+      }
+    }
+
+    if (item.dataset.agentId === state.selectedAgentId) {
+      item.classList.add('selected')
+    }
+
+    const stateTag = index < state.currentStepIndex ? 'done' :
+                     index === state.currentStepIndex ? 'run' : 'idle'
+
+    item.innerHTML = `
+      <div class="agent-dot"></div>
+      <div class="agent-name">${agentName}</div>
+      <div class="agent-state-tag">${stateTag}</div>
+    `
+
+    item.addEventListener('click', () => selectAgent(index))
+    list.appendChild(item)
+  })
+
+  // Enable pipeline controls when there are agents
+  setPipelineControlsDisabled(false)
+}
+
+function setPipelineControlsDisabled(disabled) {
+  // Add Agent and Create Agent are always enabled
+  const alwaysEnabled = ['btn-add-agent', 'btn-create-agent']
+  const disableWhenEmpty = ['btn-remove-agent', 'btn-reorder', 'btn-reroute', 'btn-skip-next']
+  
+  // Always enable these buttons
+  alwaysEnabled.forEach(id => {
+    const btn = document.getElementById(id)
+    if (btn) btn.disabled = false
+  })
+  
+  // Disable/enable these based on pipeline state
+  disableWhenEmpty.forEach(id => {
+    const btn = document.getElementById(id)
+    if (btn) btn.disabled = disabled
+  })
+}
+
+function renderLibraryAgents() {
+  const list = document.getElementById('library-agents-list')
+  list.innerHTML = ''
+
+  const pipelineAgentIds = new Set(state.pipelineSteps.map(s => s.agent_id))
+
+  state.agents.forEach(agent => {
+    if (pipelineAgentIds.has(agent.id)) return
+
+    const item = document.createElement('div')
+    item.className = 'library-agent'
+    item.innerHTML = `
+      <div class="library-agent-dot"></div>
+      <div class="library-agent-name">${agent.name}</div>
+      <div class="library-agent-usage">—</div>
+    `
+    list.appendChild(item)
+  })
+}
+
+function renderPipelineCanvas() {
+  const canvas = document.getElementById('pipeline-canvas')
+  canvas.innerHTML = ''
+
+  // Show empty state if no agents in pipeline
+  if (state.pipelineSteps.length === 0) {
+    canvas.innerHTML = `
+      <div class="pipeline-empty-state">
+        <div class="pipeline-empty-icon">⊘</div>
+        <div class="pipeline-empty-title">No agents in pipeline</div>
+        <div class="pipeline-empty-text">
+          This project has no agents configured.<br>
+          Edit the pipeline to add agents and start the workflow.
+        </div>
+      </div>
+    `
+    return
+  }
+
+  state.pipelineSteps.forEach((step, index) => {
+    const agentName = step.agent_name || 'Unknown'
+
+    // Create node
+    const node = document.createElement('div')
+    node.className = 'pipeline-node idle'
+    node.dataset.index = index
+    node.dataset.agentId = step.agent_id
+
+    if (index < state.currentStepIndex) {
+      node.classList.add('complete')
+    } else if (index === state.currentStepIndex) {
+      if (state.pipelineState === 'running') {
+        node.classList.add('running')
+      } else if (state.pipelineState === 'error') {
+        node.classList.add('error')
+      }
+    }
+
+    if (index === state.selectedNodeIndex) {
+      node.classList.add('selected')
+    }
+
+    const statusText = index < state.currentStepIndex ? 'Complete' :
+                       index === state.currentStepIndex ? (state.pipelineState === 'running' ? 'Running…' : state.pipelineState) :
+                       'Idle'
+
+    node.innerHTML = `
+      <div class="node-index">${String(index + 1).padStart(2, '0')}</div>
+      <div class="node-name">${agentName}</div>
+      <div class="node-status">${statusText}</div>
+      <div class="node-state-bar"></div>
+    `
+
+    node.addEventListener('click', () => selectAgent(index))
+    canvas.appendChild(node)
+
+    // Add connector if not last
+    if (index < state.pipelineSteps.length - 1) {
+      const connector = document.createElement('div')
+      connector.className = 'connector'
+      if (index < state.currentStepIndex) {
+        connector.classList.add('done')
+      } else if (index === state.currentStepIndex && state.pipelineState === 'running') {
+        connector.classList.add('active')
+      }
+      connector.innerHTML = `
+        <div class="connector-line"></div>
+        <div class="connector-arrow">›</div>
+      `
+      canvas.appendChild(connector)
+    }
+  })
+}
+
+// ─── Agent Selection ────────────────────────────────────────────────────────
+
+function selectAgent(index) {
+  state.selectedNodeIndex = index
+  state.selectedAgentId = state.pipelineSteps[index]?.agent_id
+
+  // Update sidebar selection - use dataset.index for accurate matching
+  document.querySelectorAll('#pipeline-agents-list .agent-item').forEach((item) => {
+    const itemIndex = parseInt(item.dataset.index, 10)
+    item.classList.toggle('selected', itemIndex === index)
+  })
+
+  // Update canvas selection - use dataset.index for accurate matching
+  document.querySelectorAll('.pipeline-node').forEach((node) => {
+    const nodeIndex = parseInt(node.dataset.index, 10)
+    node.classList.toggle('selected', nodeIndex === index)
+  })
+
+  updateDetailPanel()
+}
+
+async function updateDetailPanel() {
+  const index = state.selectedNodeIndex
+  if (index === -1 || !state.pipelineSteps[index]) {
+    document.getElementById('detail-agent-name').textContent = 'No agent selected'
+    document.getElementById('detail-status').textContent = '—'
+    document.getElementById('detail-elapsed').textContent = '—'
+    document.getElementById('detail-timeout').textContent = '—'
+    document.getElementById('detail-reads').textContent = '—'
+    document.getElementById('detail-output').textContent = '—'
+    document.getElementById('agent-output').innerHTML = '<div class="output-placeholder">Select an agent to view output</div>'
+    return
+  }
+
+  const step = state.pipelineSteps[index]
+  const agent = state.agents.find(a => a.id === step.agent_id)
+
+  document.getElementById('detail-agent-name').textContent = agent?.name || step.agent_name || 'Unknown'
+  document.getElementById('detail-status').textContent = index < state.currentStepIndex ? 'Complete' :
+                                                         index === state.currentStepIndex ? state.pipelineState : 'Idle'
+  document.getElementById('detail-timeout').textContent = agent ? `${agent.timeout_seconds}s` : '—'
+  document.getElementById('detail-reads').textContent = agent?.reads?.length ? `${agent.reads.length} files` : 'None'
+
+  // Load output file
+  if (state.currentProject && agent) {
+    try {
+      const outputPath = await window.api.getAgentOutputPath(state.currentProject.projectPath, agent.filePath)
+      const content = await window.api.readContextFile(outputPath)
+      state.agentOutputs.set(step.agent_id, content)
+      document.getElementById('agent-output').textContent = content || '(No output yet)'
+      document.getElementById('detail-output').textContent = content ? `${(content.length / 1024).toFixed(1)} KB` : '—'
+    } catch {
+      document.getElementById('agent-output').textContent = '(File not found)'
+      document.getElementById('detail-output').textContent = '—'
+    }
+  }
+
+  // Update progress bar
+  const total = state.pipelineSteps.length
+  const completed = state.currentStepIndex >= 0 ? state.currentStepIndex : 0
+  const pct = total > 0 ? (completed / total) * 100 : 0
+  document.getElementById('progress-fill').style.width = `${pct}%`
+  document.getElementById('progress-text').textContent = `Step ${Math.min(completed + 1, total)} of ${total}`
+
+  // Revision section (hidden by default for now)
+  document.getElementById('revision-section').classList.add('hidden')
+}
+
+function updateAgentControls() {
+  const continueBtn = document.getElementById('btn-continue')
+  const interruptBtn = document.getElementById('btn-interrupt')
+  const killBtn = document.getElementById('btn-kill-agent')
+  const editOutputBtn = document.getElementById('btn-edit-output')
+
+  // Continue only when paused at transition
+  continueBtn.classList.toggle('hidden', state.pipelineState !== 'paused')
+
+  // Interrupt only when running
+  interruptBtn.disabled = state.pipelineState !== 'running'
+
+  // Kill only when agent is running
+  killBtn.classList.toggle('hidden', state.pipelineState !== 'running' || state.currentStepIndex === -1)
+
+  // Edit output always enabled if there's output
+  editOutputBtn.disabled = !state.agentOutputs.get(state.pipelineSteps[state.selectedNodeIndex]?.agent_id)
+}
+
+// ─── Pipeline Control Actions ───────────────────────────────────────────────
+
+async function togglePause() {
+  try {
+    if (state.pipelineState === 'running') {
+      await window.api.pausePipeline()
+    } else if (state.pipelineState === 'paused') {
+      await window.api.resumePipeline()
+    }
+  } catch (e) {
+    appendLogLine('Failed to toggle pause: ' + e.message, 'error')
+  }
+}
+
+async function handleAbort() {
+  if (!confirm('Are you sure you want to abort the pipeline?')) return
+  try {
+    await window.api.abortPipeline()
+    state.pipelineState = 'idle'
+    updateTitlebarStatus()
+  } catch (e) {
+    appendLogLine('Failed to abort: ' + e.message, 'error')
+  }
+}
+
+async function handleContinue() {
+  try {
+    await window.api.resumePipeline()
+  } catch (e) {
+    appendLogLine('Failed to continue: ' + e.message, 'error')
+  }
+}
+
+async function handleInterrupt() {
+  try {
+    await window.api.pausePipeline()
+  } catch (e) {
+    appendLogLine('Failed to interrupt: ' + e.message, 'error')
+  }
+}
+
+async function handleKillAgent() {
+  try {
+    await window.api.killAgent()
+  } catch (e) {
+    appendLogLine('Failed to kill agent: ' + e.message, 'error')
+  }
+}
+
+function handleEditOutput() {
+  appendLogLine('Edit Output not implemented', 'warn')
+}
+
+// ─── Activity Log ───────────────────────────────────────────────────────────
+
+function appendLogLine(message, type = 'info') {
+  const logLines = document.getElementById('log-lines')
+  const now = new Date()
+  const time = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`
+
+  const line = document.createElement('div')
+  line.className = `log-line ${type}`
+  line.innerHTML = `
+    <span class="log-time">${time}</span>
+    <span class="log-msg">${escapeHtml(message)}</span>
+  `
+
+  logLines.appendChild(line)
+  logLines.scrollTop = logLines.scrollHeight
+
+  state.logEntries.push({ time, message, type })
+}
+
+function clearLog() {
+  document.getElementById('log-lines').innerHTML = ''
+  state.logEntries = []
+}
+
+function escapeHtml(text) {
+  const div = document.createElement('div')
+  div.textContent = text
+  return div.innerHTML
+}
+
+// ─── Project Management ─────────────────────────────────────────────────────
+
+async function openProjectDialog() {
+  try {
+    const folderPath = await window.api.openFolderDialog()
+    if (!folderPath) {
+      // User cancelled — if no project is open, show welcome dialog again
+      if (!state.currentProject) {
+        showDialog('dialog-welcome')
+      }
+      return
+    }
+
+    const result = await window.api.openProject(folderPath)
+    if (result.error) {
+      appendLogLine('Failed to open project: ' + result.error, 'error')
+      return
+    }
+
+    await loadProject(result.projectPath)
+  } catch (e) {
+    appendLogLine('Failed to open project: ' + e.message, 'error')
+  }
+}
+
+async function loadProject(projectPath) {
+  try {
+    // Refresh agents list first to ensure we have latest data
+    state.agents = await window.api.listAgents() || []
+
+    const result = await window.api.openProject(projectPath)
+    if (result.error) {
+      appendLogLine('Failed to load project: ' + result.error, 'error')
+      return
+    }
+
+    state.currentProject = result
+    document.getElementById('tb-project-name').textContent = result.projectJson.name
+
+    // Load brief
+    try {
+      const brief = await window.api.readContextFile(pathJoin(projectPath, 'Context', 'brief.md'))
+      document.getElementById('brief-text').textContent = brief ? brief.split('\n')[0] : 'No brief loaded'
+    } catch {
+      document.getElementById('brief-text').textContent = 'No brief loaded'
+    }
+
+    // Load pipeline steps with agent names
+    state.pipelineSteps = (result.pipelineJson.steps || []).map(step => ({
+      ...step,
+      agent_name: state.agents.find(a => a.id === step.agent_id)?.name || 'Unknown',
+    }))
+
+    state.currentStepIndex = -1
+    state.pipelineState = 'idle'
+    state.selectedNodeIndex = -1
+    state.selectedAgentId = null
+
+    renderPipelineAgents()
+    renderLibraryAgents()
+    renderPipelineCanvas()
+    updateDetailPanel()
+    updateTitlebarStatus()
+    updateStatusBar()
+
+    hideDialog('dialog-welcome')
+  } catch (e) {
+    appendLogLine('Failed to load project: ' + e.message, 'error')
+  }
+}
+
+// Simple path join for renderer (avoid path module dependency)
+function pathJoin(...parts) {
+  return parts.join('/').replace(/\/+/g, '/')
+}
+
+// ─══════════════════════════════════════════════════════════════════════════
+// NEW PROJECT DIALOG SCAFFOLDING
+// ═══════════════════════════════════════════════════════════════════════════
+
+async function openNewProjectDialog() {
+  // Reset all local state
+  state.npStep = 1
+  state.npAllowedCommands = new Set()
+  state.npSelectedAgents = []
+  state.npDragSrc = null
+  state.npTotalAgents = 0
+
+  // Clear dynamic content from previous opens
+  document.getElementById('stack-picker-list').innerHTML = ''
+  document.getElementById('allowed-commands-list').innerHTML = ''
+  document.getElementById('denied-commands-list').innerHTML = ''
+  document.getElementById('agent-picker-list').innerHTML = ''
+  document.getElementById('agent-order-list').innerHTML = ''
+  document.getElementById('new-project-name').value = ''
+  document.getElementById('new-project-path').value = ''
+  document.getElementById('new-project-brief').value = ''
+  document.getElementById('new-project-path-preview').textContent = ''
+  document.getElementById('new-project-footer-status').textContent = ''
+
+  // Pre-load stack defaults and agent list
+  let stackDefaults, agents
+  try {
+    [stackDefaults, agents] = await Promise.all([
+      window.api.getStackDefaults(),
+      window.api.listAgents(),
+    ])
+    state.agents = agents || []
+    state.npTotalAgents = agents ? agents.length : 0
+  } catch (e) {
+    appendLogLine('Failed to load dialog data: ' + e.message, 'error')
+    return
+  }
+
+  npRenderStackPicker(stackDefaults)
+  npRenderDeniedList(stackDefaults.hardcodedExclude)
+  npRenderAgentPicker(agents)
+
+  showDialog('dialog-new-project')
+  npUpdateUI()
+}
+
+function npUpdateUI() {
+  // Show only the active step body
+  for (let i = 1; i <= 4; i++) {
+    const el = document.getElementById(`dialog-step-${i}`)
+    el.classList.toggle('hidden', i !== state.npStep)
+  }
+
+  // Step progress pips: done | active | pending
+  for (let i = 1; i <= 4; i++) {
+    const pip = document.getElementById(`new-project-pip-${i}`)
+    pip.className = 'step-pip' +
+      (i < state.npStep ? ' done' : i === state.npStep ? ' active' : ' pending')
+  }
+
+  document.getElementById('new-project-subtitle').textContent = NP_STEP_SUBTITLES[state.npStep - 1]
+
+  // Back disabled on step 1
+  document.getElementById('btn-new-project-back').disabled = state.npStep === 1
+
+  // Next vs Create
+  const isLast = state.npStep === 4
+  document.getElementById('btn-new-project-next').classList.toggle('hidden', isLast)
+  document.getElementById('btn-new-project-create').classList.toggle('hidden', !isLast)
+
+  npUpdateFooterStatus()
+}
+
+function npAdvance() {
+  if (state.npStep === 1) {
+    const name = document.getElementById('new-project-name').value.trim()
+    const path = document.getElementById('new-project-path').value.trim()
+    if (!name || !path) {
+      npSetStatus('Project name and location are required.', 'error')
+      return
+    }
+  }
+  if (state.npStep === 3) {
+    npSyncAllowedCommands()
+  }
+  if (state.npStep < 4) {
+    state.npStep++
+    npUpdateUI()
+    if (state.npStep === 3) npRenderAllowedList()
+  }
+}
+
+function npRetreat() {
+  if (state.npStep > 1) {
+    state.npStep--
+    npUpdateUI()
+  }
+}
+
+function npUpdateFooterStatus() {
+  if (state.npStep === 3) {
+    const count = document.querySelectorAll('#allowed-commands-list .command-row').length
+    npSetStatus(`${count} command${count !== 1 ? 's' : ''} will be allowed`, '')
+  } else if (state.npStep === 4) {
+    const count = state.npSelectedAgents.length
+    if (count > 0) {
+      npSetStatus(`${count} agent${count !== 1 ? 's' : ''} in pipeline`, '')
+    } else if (state.npTotalAgents === 0) {
+      npSetStatus('No available agents found. You\'ll need to create at least one agent if you proceed with creating this project.', 'warn')
+    } else {
+      npSetStatus('Select at least one agent.', 'error')
+    }
+  } else {
+    npSetStatus('', '')
+  }
+}
+
+function npSetStatus(msg, type) {
+  const el = document.getElementById('new-project-footer-status')
+  el.textContent = msg
+  if (type === 'error') {
+    el.className = 'dialog-footer-status error'
+  } else if (type === 'warn') {
+    el.className = 'dialog-footer-status warn'
+  } else {
+    el.className = 'dialog-footer-status'
+  }
+}
+
+function npUpdatePathPreview() {
+  const name = document.getElementById('new-project-name').value.trim() || '…'
+  const base = document.getElementById('new-project-path').value.trim() || '…'
+  document.getElementById('new-project-path-preview').textContent = base + '/' + name
+}
+
+function npRenderStackPicker(stackDefaults) {
+  const list = document.getElementById('stack-picker-list')
+  list.innerHTML = ''
+
+  // 'common' (git) commands are always included
+  if (stackDefaults.stacks.common) {
+    for (const cmd of stackDefaults.stacks.common) state.npAllowedCommands.add(cmd)
+  }
+
+  const stackNames = Object.keys(stackDefaults.stacks).filter(k => k !== 'common')
+
+  for (const stackName of stackNames) {
+    const commands = stackDefaults.stacks[stackName]
+    const item = document.createElement('div')
+    item.className = 'stack-option'
+    item.dataset.stack = stackName
+    item.innerHTML = `
+      <div class="stack-check">✓</div>
+      <div class="stack-name">${stackName.charAt(0).toUpperCase() + stackName.slice(1)}</div>
+    `
+    item.addEventListener('click', () => {
+      const selected = item.classList.toggle('selected')
+      if (selected) {
+        for (const cmd of commands) state.npAllowedCommands.add(cmd)
+      } else {
+        for (const cmd of commands) {
+          const stillNeeded = [...list.querySelectorAll('.stack-option.selected')]
+            .some(el => el !== item &&
+              (stackDefaults.stacks[el.dataset.stack] || []).includes(cmd))
+          if (!stillNeeded) state.npAllowedCommands.delete(cmd)
+        }
+      }
+    })
+    list.appendChild(item)
+  }
+}
+
+function npRenderAllowedList() {
+  const list = document.getElementById('allowed-commands-list')
+  list.innerHTML = ''
+  for (const cmd of state.npAllowedCommands) {
+    npAppendCommandRow(list, cmd)
+  }
+  npUpdateFooterStatus()
+}
+
+function npAppendCommandRow(list, value) {
+  const row = document.createElement('div')
+  row.className = 'command-row'
+  row.innerHTML = `
+    <input type="text" class="dialog-input" value="${escapeHtml(value)}">
+    <button class="command-remove" title="Remove">×</button>
+  `
+  row.querySelector('.command-remove').addEventListener('click', () => {
+    row.remove()
+    npUpdateFooterStatus()
+  })
+  list.appendChild(row)
+}
+
+function npAddBlankCommandRow() {
+  const list = document.getElementById('allowed-commands-list')
+  npAppendCommandRow(list, '')
+  list.lastElementChild.querySelector('input').focus()
+  npUpdateFooterStatus()
+}
+
+function npSyncAllowedCommands() {
+  state.npAllowedCommands = new Set(
+    [...document.querySelectorAll('#allowed-commands-list .command-row input')]
+      .map(i => i.value.trim())
+      .filter(Boolean)
+  )
+}
+
+function npRenderDeniedList(hardcodedExclude) {
+  const list = document.getElementById('denied-commands-list')
+  list.innerHTML = ''
+  const TIP = 'These values are locked -- hardcoded to prevent the agent from executing ' +
+    'any destructive behaviour, we plan to allow unlocking them in the future with ' +
+    'v2 of our safety and mitigation system'
+  for (const pattern of hardcodedExclude) {
+    const cmd = pattern.replace(/^run_shell_command\(/, '').replace(/\)$/, '')
+    const row = document.createElement('div')
+    row.className = 'command-row denied'
+    row.innerHTML = `
+      <input type="text" class="dialog-input" value="${escapeHtml(cmd)}" readonly>
+      <div class="lock-icon" data-tip="${TIP}">🔒</div>
+    `
+    list.appendChild(row)
+  }
+}
+
+function npRenderAgentPicker(agents) {
+  const list = document.getElementById('agent-picker-list')
+  list.innerHTML = ''
+  for (const agent of agents) {
+    const item = document.createElement('div')
+    item.className = 'agent-pick-item'
+    item.dataset.agentId = agent.id
+    item.dataset.agentName = agent.name
+    item.innerHTML = `
+      <div class="agent-pick-check">✓</div>
+      <div class="agent-pick-name">${escapeHtml(agent.name)}</div>
+    `
+    item.addEventListener('click', () => npToggleAgent(item, agent))
+    list.appendChild(item)
+  }
+}
+
+function npToggleAgent(item, agent) {
+  const selected = item.classList.toggle('selected')
+  if (selected) {
+    state.npSelectedAgents.push({ id: agent.id, name: agent.name })
+    npAppendOrderItem(agent)
+  } else {
+    state.npSelectedAgents = state.npSelectedAgents.filter(a => a.id !== agent.id)
+    const orderItem = document.querySelector(`#agent-order-list [data-agent-id="${agent.id}"]`)
+    if (orderItem) orderItem.remove()
+    npSyncOrderFromDOM()
+  }
+  npUpdateFooterStatus()
+}
+
+function npAppendOrderItem(agent) {
+  const list = document.getElementById('agent-order-list')
+  const item = document.createElement('div')
+  item.className = 'order-item'
+  item.dataset.agentId = agent.id
+  item.draggable = true
+  item.innerHTML = `
+    <div class="drag-handle"><span></span><span></span><span></span></div>
+    <div class="order-index">—</div>
+    <div class="order-name">${escapeHtml(agent.name)}</div>
+  `
+  npAttachDragEvents(item)
+  list.appendChild(item)
+  npRenumberOrderList()
+}
+
+function npRenumberOrderList() {
+  document.querySelectorAll('#agent-order-list .order-item').forEach((item, i) => {
+    item.querySelector('.order-index').textContent = String(i + 1).padStart(2, '0')
+  })
+}
+
+function npSyncOrderFromDOM() {
+  state.npSelectedAgents = [...document.querySelectorAll('#agent-order-list .order-item')]
+    .map(item => ({
+      id: item.dataset.agentId,
+      name: item.querySelector('.order-name').textContent,
+    }))
+}
+
+function npAttachDragEvents(item) {
+  item.addEventListener('dragstart', (e) => {
+    state.npDragSrc = item
+    e.dataTransfer.effectAllowed = 'move'
+    requestAnimationFrame(() => item.classList.add('dragging'))
+  })
+
+  item.addEventListener('dragend', () => {
+    item.classList.remove('dragging')
+    document.querySelectorAll('#agent-order-list .drag-over')
+      .forEach(el => el.classList.remove('drag-over'))
+    state.npDragSrc = null
+    npRenumberOrderList()
+    npSyncOrderFromDOM()
+    npUpdateFooterStatus()
+  })
+
+  item.addEventListener('dragover', (e) => {
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'move'
+    if (item !== state.npDragSrc) {
+      document.querySelectorAll('#agent-order-list .drag-over')
+        .forEach(el => el.classList.remove('drag-over'))
+      item.classList.add('drag-over')
+    }
+  })
+
+  item.addEventListener('dragleave', () => item.classList.remove('drag-over'))
+
+  item.addEventListener('drop', (e) => {
+    e.preventDefault()
+    item.classList.remove('drag-over')
+    if (!state.npDragSrc || state.npDragSrc === item) return
+    const list = item.parentNode
+    const items = [...list.querySelectorAll('.order-item')]
+    const srcIdx = items.indexOf(state.npDragSrc)
+    const destIdx = items.indexOf(item)
+    if (srcIdx < destIdx) {
+      list.insertBefore(state.npDragSrc, item.nextSibling)
+    } else {
+      list.insertBefore(state.npDragSrc, item)
+    }
+  })
+}
+
+async function npCreate() {
+  const name = document.getElementById('new-project-name').value.trim()
+  const folderPath = document.getElementById('new-project-path').value.trim()
+  const brief = document.getElementById('new-project-brief').value.trim()
+
+  if (!name || !folderPath) {
+    npSetStatus('Project name and location are required.', 'error')
+    return
+  }
+
+  // Warn if no agents selected, but allow creation
+  if (state.npSelectedAgents.length === 0) {
+    npSetStatus('Warning: Creating project without agents. Pipeline will be empty.', 'warn')
+  }
+
+  try {
+    const result = await window.api.createProject({
+      name,
+      folderPath,
+      steps: state.npSelectedAgents.map(a => ({ agent_id: a.id, type: 'standard' })),
+      allowedCommands: [...state.npAllowedCommands],
+      brief,
+    })
+
+    if (result.error) {
+      npSetStatus(result.error, 'error')
+      appendLogLine('Failed to create project: ' + result.error, 'error')
+      return
+    }
+
+    hideDialog('dialog-new-project')
+    await loadProject(result.projectPath)
+  } catch (e) {
+    npSetStatus(e.message, 'error')
+    appendLogLine('Failed to create project: ' + e.message, 'error')
+  }
+}
+
+// ─── Add Agent Dialog ───────────────────────────────────────────────────────
+
+async function openAddAgentDialog() {
+  if (!state.currentProject) {
+    appendLogLine('No project open', 'warn')
+    return
+  }
+
+  try {
+    // Load agents from library
+    const agents = await window.api.listAgents()
+    const list = document.getElementById('add-agent-list')
+    list.innerHTML = ''
+
+    if (!agents || agents.length === 0) {
+      list.innerHTML = '<div class="pipeline-agents-empty"><div class="pipeline-agents-empty-text">No agents available. Create an agent first.</div></div>'
+    } else {
+      // Get current pipeline agent IDs to exclude them
+      const currentAgentIds = new Set(state.pipelineSteps.map(s => s.agent_id))
+
+      for (const agent of agents) {
+        const alreadyInPipeline = currentAgentIds.has(agent.id)
+        const item = document.createElement('div')
+        item.className = 'add-agent-item' + (alreadyInPipeline ? ' disabled' : '')
+        item.innerHTML = `
+          <div class="add-agent-name">${escapeHtml(agent.name)}</div>
+          ${alreadyInPipeline ? '<span class="add-agent-in-pipeline">✓ Already in pipeline</span>' : ''}
+        `
+        item.addEventListener('click', () => {
+          if (alreadyInPipeline) return
+          addAgentToPipeline(agent)
+        })
+        list.appendChild(item)
+      }
+    }
+
+    showDialog('dialog-add-agent')
+  } catch (e) {
+    appendLogLine('Failed to load agents: ' + e.message, 'error')
+  }
+}
+
+async function addAgentToPipeline(agent) {
+  try {
+    // Add agent to pipeline steps
+    const newStep = { agent_id: agent.id, type: 'standard', agent_name: agent.name }
+    state.pipelineSteps.push(newStep)
+
+    // Save updated pipeline
+    await window.api.updatePipelineSteps(state.pipelineSteps)
+
+    hideDialog('dialog-add-agent')
+    appendLogLine(`Added "${agent.name}" to pipeline`, 'ok')
+
+    // Re-render UI
+    renderPipelineAgents()
+    renderPipelineCanvas()
+  } catch (e) {
+    appendLogLine('Failed to add agent: ' + e.message, 'error')
+  }
+}
+
+function wireNewProjectDialog() {
+  document.getElementById('btn-new-project-cancel').addEventListener('click', () => {
+    hideDialog('dialog-new-project')
+    // If no project is open, show welcome dialog again
+    if (!state.currentProject) {
+      showDialog('dialog-welcome')
+    }
+  })
+
+  document.getElementById('btn-new-project-back').addEventListener('click', npRetreat)
+
+  document.getElementById('btn-new-project-next').addEventListener('click', () => {
+    if (state.npStep === 3) npSyncAllowedCommands()
+    npAdvance()
+  })
+
+  document.getElementById('btn-new-project-create').addEventListener('click', npCreate)
+
+  document.getElementById('btn-pick-folder').addEventListener('click', async () => {
+    const picked = await window.api.openFolderDialog()
+    if (picked) {
+      document.getElementById('new-project-path').value = picked
+      npUpdatePathPreview()
+    }
+  })
+
+  document.getElementById('new-project-name').addEventListener('input', npUpdatePathPreview)
+  document.getElementById('new-project-path').addEventListener('input', npUpdatePathPreview)
+
+  document.getElementById('btn-add-command').addEventListener('click', npAddBlankCommandRow)
+
+  // Create Agent button in dialog (step 4)
+  document.getElementById('btn-dialog-create-agent').addEventListener('click', async () => {
+    try {
+      const result = await window.api.createBoilerplateAgent()
+      if (result.error) {
+        appendLogLine('Failed to create agent: ' + result.error, 'error')
+        return
+      }
+      appendLogLine('Agent created and opened in editor', 'ok')
+      // Reload agents list and re-render picker
+      state.agents = await window.api.listAgents()
+      state.npTotalAgents = state.agents.length
+      // Re-render the agent picker with updated list
+      npRenderAgentPicker(state.agents)
+      npUpdateFooterStatus()
+    } catch (e) {
+      appendLogLine('Failed to create agent: ' + e.message, 'error')
+    }
+  })
+
+  // Edit warning dialog buttons
+  document.getElementById('btn-edit-confirm-changes').addEventListener('click', async () => {
+    try {
+      await window.api.confirmAgentChanges(state.editingAgentId)
+      hideDialog('dialog-edit-warning')
+      state.editingAgentId = null
+    } catch (e) {
+      appendLogLine('Failed to confirm changes: ' + e.message, 'error')
+    }
+  })
+
+  document.getElementById('btn-edit-cancel-changes').addEventListener('click', async () => {
+    try {
+      await window.api.cancelAgentChanges(state.editingAgentId)
+      hideDialog('dialog-edit-warning')
+      state.editingAgentId = null
+    } catch (e) {
+      appendLogLine('Failed to cancel changes: ' + e.message, 'error')
+    }
+  })
+}
+
+// ─── Dialog Utilities ───────────────────────────────────────────────────────
+
+function showDialog(id) {
+  document.getElementById(id).classList.remove('hidden')
+}
+
+function hideDialog(id) {
+  document.getElementById(id).classList.add('hidden')
+}
+
+// ─── Edit Warning Dialog ────────────────────────────────────────────────────
+
+async function handleConfirmChanges() {
+  try {
+    await window.api.confirmAgentChanges(state.editingAgentId)
+    hideDialog('dialog-edit-warning')
+    state.editingAgentId = null
+  } catch (e) {
+    appendLogLine('Failed to confirm changes: ' + e.message, 'error')
+  }
+}
+
+async function handleCancelChanges() {
+  try {
+    await window.api.cancelAgentChanges(state.editingAgentId)
+    hideDialog('dialog-edit-warning')
+    state.editingAgentId = null
+  } catch (e) {
+    appendLogLine('Failed to cancel changes: ' + e.message, 'error')
+  }
+}
+
+// ─── Start Pipeline ─────────────────────────────────────────────────────────
+
+async function startPipeline(resumeFrom = null) {
+  if (!state.currentProject) return
+
+  try {
+    const result = await window.api.startPipeline(state.currentProject.projectPath, resumeFrom)
+    if (result.error) {
+      appendLogLine('Failed to start pipeline: ' + result.error, 'error')
+    }
+  } catch (e) {
+    appendLogLine('Failed to start pipeline: ' + e.message, 'error')
+  }
+}
