@@ -17,12 +17,16 @@ const state = {
   currentStepIndex: -1,
   selectedAgentId: null,
   selectedNodeIndex: -1,
+  selectedLibraryAgentId: null, // Track library agent selection separately
 
   // Agent output
   agentOutputs: new Map(), // agentId -> content
 
   // Activity log
   logEntries: [],
+
+  // Auth state
+  qwenAuthConfigured: true, // Assume true until proven otherwise
 
   // New Project Dialog state
   npStep: 1,
@@ -88,7 +92,9 @@ function setupIPCListeners() {
   })
 
   window.api.onAuthInvalid((data) => {
-    appendLogLine('Qwen CLI authentication not configured. Please set up ~/.qwen/settings.json', 'error')
+    // Auth check on startup - don't show as error, just note it
+    // Auth is only required when running pipelines, not for opening projects
+    state.qwenAuthConfigured = false
   })
 
   window.api.onWindowFocus(() => {
@@ -105,6 +111,7 @@ function wireEventListeners() {
   document.getElementById('btn-close').addEventListener('click', () => window.api.closeWindow())
 
   // Pipeline controls
+  document.getElementById('btn-start').addEventListener('click', handleStart)
   document.getElementById('btn-pause').addEventListener('click', togglePause)
   document.getElementById('btn-abort').addEventListener('click', handleAbort)
 
@@ -119,8 +126,8 @@ function wireEventListeners() {
 
   // Pipeline structure buttons
   document.getElementById('btn-add-agent').addEventListener('click', openAddAgentDialog)
-  document.getElementById('btn-remove-agent').addEventListener('click', () => appendLogLine('Remove Agent not implemented', 'warn'))
-  document.getElementById('btn-reorder').addEventListener('click', () => appendLogLine('Reorder not implemented', 'warn'))
+  document.getElementById('btn-remove-agent').addEventListener('click', handleRemoveAgent)
+  document.getElementById('btn-reorder').addEventListener('click', handleReorder)
   document.getElementById('btn-reroute').addEventListener('click', () => appendLogLine('Reroute not implemented', 'warn'))
   document.getElementById('btn-skip-next').addEventListener('click', () => appendLogLine('Skip Next not implemented', 'warn'))
 
@@ -287,6 +294,7 @@ async function handleWindowFocus() {
 
 function updateTitlebarStatus() {
   const pill = document.getElementById('status-pill')
+  const startBtn = document.getElementById('btn-start')
   const pauseBtn = document.getElementById('btn-pause')
   const pauseIcon = document.getElementById('pause-icon')
 
@@ -295,13 +303,21 @@ function updateTitlebarStatus() {
   const statusText = state.pipelineState.charAt(0).toUpperCase() + state.pipelineState.slice(1)
   pill.textContent = statusText
 
+  // Show/hide buttons based on pipeline state
+  // Start: visible when idle, hidden when running or paused
+  // Pause: visible when running, hidden when idle or paused
   if (state.pipelineState === 'running') {
+    startBtn.style.display = 'none'
+    pauseBtn.style.display = 'flex'
     pauseIcon.textContent = '⏸'
     pauseBtn.classList.remove('paused')
   } else if (state.pipelineState === 'paused') {
-    pauseIcon.textContent = '▶'
-    pauseBtn.classList.add('paused')
+    startBtn.style.display = 'none'
+    pauseBtn.style.display = 'none'
   } else {
+    // idle
+    startBtn.style.display = 'flex'
+    pauseBtn.style.display = 'flex'
     pauseIcon.textContent = '⏸'
     pauseBtn.classList.remove('paused')
   }
@@ -336,6 +352,7 @@ function renderPipelineAgents() {
     item.className = 'agent-item'
     item.dataset.agentId = step.agent_id
     item.dataset.index = index
+    item.setAttribute('draggable', 'true')
 
     // Determine state class
     if (index < state.currentStepIndex) {
@@ -355,13 +372,27 @@ function renderPipelineAgents() {
     const stateTag = index < state.currentStepIndex ? 'done' :
                      index === state.currentStepIndex ? 'run' : 'idle'
 
+    // Selection indicator: triangle for selected, nothing for others
+    const selectionIndicator = item.dataset.agentId === state.selectedAgentId
+      ? '<div class="agent-triangle">▶</div>'
+      : '<div class="agent-triangle-placeholder"></div>'
+
+    // Running indicator: bold "Running" text for currently running agent
+    const runningIndicator = (index === state.currentStepIndex && state.pipelineState === 'running')
+      ? '<span class="agent-running-label">Running</span>'
+      : ''
+
     item.innerHTML = `
-      <div class="agent-dot"></div>
-      <div class="agent-name">${agentName}</div>
+      ${selectionIndicator}
+      <div class="agent-name-wrapper">
+        <div class="agent-name">${agentName}</div>
+        ${runningIndicator}
+      </div>
       <div class="agent-state-tag">${stateTag}</div>
     `
 
     item.addEventListener('click', () => selectAgent(index))
+    attachDragEvents(item)
     list.appendChild(item)
   })
 
@@ -398,17 +429,22 @@ function renderLibraryAgents() {
 
     const item = document.createElement('div')
     item.className = 'library-agent'
+    if (agent.id === state.selectedLibraryAgentId) {
+      item.classList.add('selected')
+    }
     item.innerHTML = `
       <div class="library-agent-dot"></div>
       <div class="library-agent-name">${agent.name}</div>
       <div class="library-agent-usage">—</div>
     `
+    item.addEventListener('click', () => selectLibraryAgent(agent))
     list.appendChild(item)
   })
 }
 
 function renderPipelineCanvas() {
   const canvas = document.getElementById('pipeline-canvas')
+  const canvasInner = document.getElementById('canvas-inner')
   canvas.innerHTML = ''
 
   // Show empty state if no agents in pipeline
@@ -460,7 +496,10 @@ function renderPipelineCanvas() {
       <div class="node-state-bar"></div>
     `
 
-    node.addEventListener('click', () => selectAgent(index))
+    node.addEventListener('click', (e) => {
+      e.stopPropagation() // Prevent canvas click from firing
+      selectAgent(index)
+    })
     canvas.appendChild(node)
 
     // Add connector if not last
@@ -477,6 +516,22 @@ function renderPipelineCanvas() {
         <div class="connector-arrow">›</div>
       `
       canvas.appendChild(connector)
+    }
+  })
+
+  // Add click handler to canvas for deselection
+  canvas.addEventListener('click', (e) => {
+    // Only deselect if clicking on the canvas itself, not a node or connector
+    if (e.target === canvas) {
+      deselectAgent()
+    }
+  })
+
+  // Add click handler to canvas-inner for deselection
+  canvasInner.addEventListener('click', (e) => {
+    // Only deselect if clicking on canvas-inner directly (background area)
+    if (e.target === canvasInner) {
+      deselectAgent()
     }
   })
 }
@@ -502,7 +557,73 @@ function selectAgent(index) {
   updateDetailPanel()
 }
 
-async function updateDetailPanel() {
+function deselectAgent() {
+  state.selectedNodeIndex = -1
+  state.selectedAgentId = null
+  state.selectedLibraryAgentId = null
+
+  // Clear sidebar selection
+  document.querySelectorAll('#pipeline-agents-list .agent-item').forEach((item) => {
+    item.classList.remove('selected')
+  })
+
+  // Clear canvas selection
+  document.querySelectorAll('.pipeline-node').forEach((node) => {
+    node.classList.remove('selected')
+  })
+
+  // Clear library selection
+  document.querySelectorAll('#library-agents-list .library-agent').forEach((item) => {
+    item.classList.remove('selected')
+  })
+
+  updateDetailPanel()
+}
+
+function selectLibraryAgent(agent) {
+  // Clear pipeline selection
+  state.selectedNodeIndex = -1
+  state.selectedAgentId = null
+
+  // Set library selection
+  state.selectedLibraryAgentId = agent.id
+
+  // Update sidebar selection for pipeline agents
+  document.querySelectorAll('#pipeline-agents-list .agent-item').forEach((item) => {
+    item.classList.remove('selected')
+  })
+
+  // Update library selection
+  document.querySelectorAll('#library-agents-list .library-agent').forEach((item) => {
+    item.classList.remove('selected')
+  })
+  // Re-render library to show selection
+  renderLibraryAgents()
+
+  updateDetailPanel(agent)
+}
+
+async function updateDetailPanel(libraryAgent = null) {
+  // Check if a library agent is selected
+  if (libraryAgent || state.selectedLibraryAgentId) {
+    const agent = libraryAgent || state.agents.find(a => a.id === state.selectedLibraryAgentId)
+    if (agent) {
+      document.getElementById('detail-agent-name').textContent = agent.name
+      document.getElementById('detail-status').textContent = 'Not in pipeline'
+      document.getElementById('detail-elapsed').textContent = '—'
+      document.getElementById('detail-timeout').textContent = agent ? `${agent.timeout_seconds}s` : '—'
+      document.getElementById('detail-reads').textContent = agent?.reads?.length ? `${agent.reads.length} files` : 'None'
+      document.getElementById('detail-output').textContent = '—'
+      document.getElementById('agent-output').innerHTML = '<div class="output-placeholder">Library agents have no output until added to a pipeline</div>'
+
+      // Hide progress bar for library agents
+      document.getElementById('progress-fill').style.width = '0%'
+      document.getElementById('progress-text').textContent = 'Step 0 of 0'
+      document.getElementById('revision-section').classList.add('hidden')
+      return
+    }
+  }
+
   const index = state.selectedNodeIndex
   if (index === -1 || !state.pipelineSteps[index]) {
     document.getElementById('detail-agent-name').textContent = 'No agent selected'
@@ -572,14 +693,31 @@ function updateAgentControls() {
 
 async function togglePause() {
   try {
+    appendLogLine(`Toggle pause: current state = ${state.pipelineState}`, 'info')
     if (state.pipelineState === 'running') {
+      appendLogLine('Pausing pipeline...', 'info')
       await window.api.pausePipeline()
     } else if (state.pipelineState === 'paused') {
+      appendLogLine('Resuming pipeline...', 'info')
       await window.api.resumePipeline()
+    } else {
+      appendLogLine(`Cannot toggle pause: state is ${state.pipelineState}`, 'warn')
     }
   } catch (e) {
     appendLogLine('Failed to toggle pause: ' + e.message, 'error')
   }
+}
+
+async function handleStart() {
+  if (!state.currentProject) {
+    appendLogLine('No project open', 'warn')
+    return
+  }
+  if (state.pipelineSteps.length === 0) {
+    appendLogLine('No agents in pipeline. Add agents before starting.', 'warn')
+    return
+  }
+  await startPipeline()
 }
 
 async function handleAbort() {
@@ -1154,11 +1292,182 @@ async function addAgentToPipeline(agent) {
     hideDialog('dialog-add-agent')
     appendLogLine(`Added "${agent.name}" to pipeline`, 'ok')
 
+    // Refresh agents list from library
+    state.agents = await window.api.listAgents()
+
     // Re-render UI
     renderPipelineAgents()
+    renderLibraryAgents()
     renderPipelineCanvas()
   } catch (e) {
     appendLogLine('Failed to add agent: ' + e.message, 'error')
+  }
+}
+
+async function handleRemoveAgent() {
+  // Check if an agent is selected
+  if (state.selectedNodeIndex === -1 || !state.pipelineSteps[state.selectedNodeIndex]) {
+    appendLogLine('There are no agents selected, please select an agent first', 'warn')
+    return
+  }
+
+  const indexToRemove = state.selectedNodeIndex
+  const agentName = state.pipelineSteps[indexToRemove].agent_name || 'Unknown'
+
+  try {
+    // Remove agent from pipeline steps
+    state.pipelineSteps.splice(indexToRemove, 1)
+
+    // Save updated pipeline
+    await window.api.updatePipelineSteps(state.pipelineSteps)
+
+    appendLogLine(`Removed "${agentName}" from pipeline`, 'ok')
+
+    // Refresh agents list from library
+    state.agents = await window.api.listAgents()
+
+    // Clear selection
+    state.selectedNodeIndex = -1
+    state.selectedAgentId = null
+    state.selectedLibraryAgentId = null
+
+    // Re-render UI
+    renderPipelineAgents()
+    renderLibraryAgents()
+    renderPipelineCanvas()
+    updateDetailPanel()
+  } catch (e) {
+    appendLogLine('Failed to remove agent: ' + e.message, 'error')
+  }
+}
+
+function handleReorder() {
+  // Check if pipeline is running
+  if (state.pipelineState === 'running') {
+    showDialog('dialog-reorder-warning')
+    return
+  }
+
+  appendLogLine('Drag agents in the Agents pane to reorder them', 'info')
+}
+
+// Shared drag state
+let dragSrcEl = null
+
+function attachDragEvents(item) {
+  function handleDragStart(e) {
+    // Block drag if pipeline is running
+    if (state.pipelineState === 'running') {
+      e.preventDefault()
+      showDialog('dialog-reorder-warning')
+      return false
+    }
+
+    dragSrcEl = this
+    e.dataTransfer.effectAllowed = 'move'
+    e.dataTransfer.setData('text/html', this.innerHTML)
+    this.classList.add('dragging')
+  }
+
+  function handleDragOver(e) {
+    if (e.preventDefault) {
+      e.preventDefault()
+    }
+    e.dataTransfer.dropEffect = 'move'
+    return false
+  }
+
+  function handleDragEnter(e) {
+    this.classList.add('drag-over')
+  }
+
+  function handleDragLeave(e) {
+    // Only remove drag-over if we're leaving the item entirely,
+    // not when moving to a child element
+    const relatedTarget = e.relatedTarget
+    if (!this.contains(relatedTarget)) {
+      this.classList.remove('drag-over')
+    }
+  }
+
+  function handleDrop(e) {
+    if (e.stopPropagation) {
+      e.stopPropagation()
+    }
+
+    if (dragSrcEl && dragSrcEl !== this) {
+      // Get indices
+      const srcIndex = parseInt(dragSrcEl.dataset.index, 10)
+      const destIndex = parseInt(this.dataset.index, 10)
+
+      // Check for incomplete agents and archive their output files
+      const movedStep = state.pipelineSteps[srcIndex]
+      const isAgentIncomplete = srcIndex <= state.currentStepIndex && state.pipelineState !== 'idle'
+
+      if (isAgentIncomplete && state.currentProject) {
+        // Archive the incomplete agent's output file with timestamp
+        archiveIncompleteAgentOutput(movedStep)
+      }
+
+      // Reorder in state
+      state.pipelineSteps.splice(srcIndex, 1)
+      state.pipelineSteps.splice(destIndex, 0, movedStep)
+
+      // Re-render UI
+      renderPipelineAgents()
+      renderPipelineCanvas()
+
+      // Save updated pipeline
+      window.api.updatePipelineSteps(state.pipelineSteps).catch((e) => {
+        appendLogLine('Failed to save pipeline order: ' + e.message, 'error')
+      })
+
+      appendLogLine(`Reordered pipeline: "${movedStep.agent_name}" moved to position ${destIndex + 1}`, 'info')
+    }
+
+    dragSrcEl = null
+    return false
+  }
+
+  function handleDragEnd(e) {
+    this.classList.remove('dragging')
+    // Clear drag-over classes from all items
+    document.querySelectorAll('#pipeline-agents-list .agent-item').forEach((i) => {
+      i.classList.remove('drag-over')
+    })
+    dragSrcEl = null
+  }
+
+  item.addEventListener('dragstart', handleDragStart, false)
+  item.addEventListener('dragenter', handleDragEnter, false)
+  item.addEventListener('dragover', handleDragOver, false)
+  item.addEventListener('dragleave', handleDragLeave, false)
+  item.addEventListener('drop', handleDrop, false)
+  item.addEventListener('dragend', handleDragEnd, false)
+}
+
+async function archiveIncompleteAgentOutput(step) {
+  if (!state.currentProject) return
+
+  // Find the agent to get its file path
+  const agent = state.agents.find(a => a.id === step.agent_id)
+  if (!agent) return
+
+  try {
+    const outputPath = await window.api.getAgentOutputPath(state.currentProject.projectPath, agent.filePath)
+    const content = await window.api.readContextFile(outputPath)
+
+    // Only archive if there's content
+    if (content && content.trim().length > 0) {
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5) // YYYY-MM-DDTHH-MM-SS
+      const archivedPath = outputPath.replace(/\.md$/, `.${timestamp}.archived.md`)
+
+      await window.api.writeContextFile(archivedPath, content)
+      appendLogLine(`Archived incomplete output for "${step.agent_name}" to ${archivedPath.split('/').pop()}`, 'warn')
+    }
+  } catch (e) {
+    // File might not exist yet, that's ok
+    appendLogLine(`No output file to archive for "${step.agent_name}"`, 'info')
   }
 }
 
@@ -1233,6 +1542,11 @@ function wireNewProjectDialog() {
       appendLogLine('Failed to cancel changes: ' + e.message, 'error')
     }
   })
+
+  // Reorder warning dialog
+  document.getElementById('btn-reorder-warning-ok').addEventListener('click', () => {
+    hideDialog('dialog-reorder-warning')
+  })
 }
 
 // ─── Dialog Utilities ───────────────────────────────────────────────────────
@@ -1271,6 +1585,12 @@ async function handleCancelChanges() {
 
 async function startPipeline(resumeFrom = null) {
   if (!state.currentProject) return
+
+  // Check auth before starting pipeline
+  if (!state.qwenAuthConfigured) {
+    appendLogLine('Qwen CLI authentication not configured. Please set up ~/.qwen/settings.json before running pipelines.', 'error')
+    return
+  }
 
   try {
     const result = await window.api.startPipeline(state.currentProject.projectPath, resumeFrom)

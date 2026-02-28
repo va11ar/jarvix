@@ -34,6 +34,9 @@
 
       <div class="tb-controls">
         <div class="tb-pill idle" id="status-pill">Idle</div>
+        <button class="tb-btn start" id="btn-start" data-tip="Start Pipeline" title="" aria-label="Start Pipeline">
+          ▶
+        </button>
         <button class="tb-btn pause" id="btn-pause" data-tip="Pause" title="" aria-label="Pause">
           <span id="pause-icon">⏸</span>
         </button>
@@ -310,6 +313,23 @@
       </div>
       <div class="dialog-footer">
         <button class="footer-btn" id="btn-add-agent-cancel">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Reorder Warning Dialog -->
+  <div class="overlay hidden" id="dialog-reorder-warning">
+    <div class="dialog" style="width:420px;">
+      <div class="dialog-header">
+        <div class="dialog-title">Pipeline Running</div>
+      </div>
+      <div class="dialog-body" style="padding:16px;">
+        <p style="color:var(--text-dim);margin-bottom:12px;">
+          The pipeline is currently running. The pipeline needs to be either paused or stopped before you can reorder agents.
+        </p>
+      </div>
+      <div class="dialog-footer">
+        <button class="footer-btn primary" id="btn-reorder-warning-ok">OK</button>
       </div>
     </div>
   </div>

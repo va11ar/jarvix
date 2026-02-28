@@ -235,12 +235,17 @@ class PipelineRunner {
    * @returns {Promise<void>}
    */
   async pause() {
-    if (this.state !== PIPELINE_STATES.RUNNING) return
+    console.log('[PipelineRunner] pause() called, current state:', this.state)
+    if (this.state !== PIPELINE_STATES.RUNNING) {
+      console.log('[PipelineRunner] pause() aborted: state is not RUNNING')
+      return
+    }
 
     this.state = PIPELINE_STATES.PAUSED
     this.pausePromise = new Promise((resolve) => {
       this.resumeCallback = resolve
     })
+    console.log('[PipelineRunner] Pipeline paused, notifying renderer')
     this._notifyStatus()
   }
 
@@ -249,13 +254,18 @@ class PipelineRunner {
    * @returns {Promise<void>}
    */
   async resume() {
-    if (this.state !== PIPELINE_STATES.PAUSED) return
+    console.log('[PipelineRunner] resume() called, current state:', this.state)
+    if (this.state !== PIPELINE_STATES.PAUSED) {
+      console.log('[PipelineRunner] resume() aborted: state is not PAUSED')
+      return
+    }
     if (this.resumeCallback) {
       this.resumeCallback()
       this.resumeCallback = null
       this.pausePromise = null
     }
     this.state = PIPELINE_STATES.RUNNING
+    console.log('[PipelineRunner] Pipeline resumed, notifying renderer')
     this._notifyStatus()
   }
 

@@ -156,6 +156,7 @@ html, body {
   border-color: var(--border2);
   color: var(--text);
 }
+.tb-btn.start:hover { color: var(--green); border-color: var(--green-dim); }
 .tb-btn.abort:hover { color: var(--red); border-color: var(--red-dim); }
 .tb-btn.pause:hover { color: var(--amber); border-color: var(--amber-dim); }
 
@@ -310,40 +311,57 @@ html, body {
   transition: background 0.1s;
 }
 .agent-item:hover { background: var(--bg2); }
-.agent-item.selected { background: var(--bg2); border-left-color: var(--accent); }
+.agent-item.selected { background: var(--bg2); }
 .agent-item.running  { border-left-color: var(--amber); }
 .agent-item.complete { border-left-color: var(--green); opacity: 0.75; }
 .agent-item.error    { border-left-color: var(--red); }
 .agent-item.skipped  { border-left-color: var(--yellow); opacity: 0.55; }
+.agent-item.dragging { opacity: 0.5; background: var(--bg3); }
+.agent-item.drag-over { border-top: 2px solid var(--accent); }
 
-.agent-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
+.agent-triangle {
+  width: 12px;
+  height: 12px;
   flex-shrink: 0;
-  background: var(--text-faint);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 600;
 }
-.agent-item.running  .agent-dot { background: var(--amber); animation: pulse 1.4s ease-in-out infinite; }
-.agent-item.complete .agent-dot { background: var(--green); }
-.agent-item.error    .agent-dot { background: var(--red); }
-.agent-item.skipped  .agent-dot { background: var(--yellow); }
-.agent-item.selected .agent-dot { background: var(--accent); }
+.agent-triangle-placeholder {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+}
 
-@keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.3; }
+.agent-name-wrapper {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
 }
 
 .agent-name {
   font-size: 11px;
   color: var(--text);
-  flex: 1;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .agent-item.complete .agent-name { color: var(--text-dim); }
 .agent-item.skipped  .agent-name { color: var(--text-dim); text-decoration: line-through; }
+
+.agent-running-label {
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--amber);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  flex-shrink: 0;
+}
 
 .agent-state-tag {
   font-size: 9px;
@@ -370,6 +388,7 @@ html, body {
   transition: opacity 0.1s, background 0.1s;
 }
 .library-agent:hover { opacity: 1; background: var(--bg2); }
+.library-agent.selected { opacity: 1; background: var(--bg2); border-left: 2px solid var(--accent); }
 .library-agent-dot {
   width: 5px;
   height: 5px;
@@ -377,11 +396,16 @@ html, body {
   border: 1px solid var(--text-faint);
   flex-shrink: 0;
 }
+.library-agent.selected .library-agent-dot {
+  border-color: var(--accent);
+  background: var(--accent);
+}
 .library-agent-name {
   font-size: 10px;
   color: var(--text-dim);
   flex: 1;
 }
+.library-agent.selected .library-agent-name { color: var(--text); }
 .library-agent-usage {
   font-size: 9px;
   color: var(--text-faint);

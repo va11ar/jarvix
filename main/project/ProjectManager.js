@@ -92,35 +92,39 @@ async function create({ name, folderPath, steps, allowedCommands, brief }) {
  * @returns {Promise<{projectPath: string, projectJson: Object, pipelineJson: Object}>}
  */
 async function open(folderPath) {
-  const projectJson = JSON.parse(
-    await fs.readFile(path.join(folderPath, 'project.json'), 'utf8')
-  )
-  const pipelineJson = JSON.parse(
-    await fs.readFile(path.join(folderPath, 'Pipeline', 'pipeline.json'), 'utf8')
-  )
-
-  // Crash recovery: if settings.json differs from baseline.json, restore from baseline
   try {
-    const settingsPath = path.join(folderPath, '.qwen', 'settings.json')
-    const baselinePath = path.join(folderPath, '.qwen', 'baseline.json')
-    const [settingsRaw, baselineRaw] = await Promise.all([
-      fs.readFile(settingsPath, 'utf8'),
-      fs.readFile(baselinePath, 'utf8'),
-    ])
-    if (settingsRaw.trim() !== baselineRaw.trim()) {
-      await fs.writeFile(settingsPath, baselineRaw, 'utf8')
+    const projectJson = JSON.parse(
+      await fs.readFile(path.join(folderPath, 'project.json'), 'utf8')
+    )
+    const pipelineJson = JSON.parse(
+      await fs.readFile(path.join(folderPath, 'Pipeline', 'pipeline.json'), 'utf8')
+    )
+
+    // Crash recovery: if settings.json differs from baseline.json, restore from baseline
+    try {
+      const settingsPath = path.join(folderPath, '.qwen', 'settings.json')
+      const baselinePath = path.join(folderPath, '.qwen', 'baseline.json')
+      const [settingsRaw, baselineRaw] = await Promise.all([
+        fs.readFile(settingsPath, 'utf8'),
+        fs.readFile(baselinePath, 'utf8'),
+      ])
+      if (settingsRaw.trim() !== baselineRaw.trim()) {
+        await fs.writeFile(settingsPath, baselineRaw, 'utf8')
+      }
+    } catch {
+      // baseline.json missing or unreadable — leave settings.json as-is
     }
-  } catch {
-    // baseline.json missing or unreadable — leave settings.json as-is
-  }
 
-  const registry = await readRegistry()
-  if (!registry.includes(folderPath)) {
-    registry.push(folderPath)
-    await writeRegistry(registry)
-  }
+    const registry = await readRegistry()
+    if (!registry.includes(folderPath)) {
+      registry.push(folderPath)
+      await writeRegistry(registry)
+    }
 
-  return { projectPath: folderPath, projectJson, pipelineJson }
+    return { projectPath: folderPath, projectJson, pipelineJson }
+  } catch (e) {
+    throw new Error(`Failed to open project at "${folderPath}": ${e.message}`)
+  }
 }
 
 /**
