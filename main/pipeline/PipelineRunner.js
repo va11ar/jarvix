@@ -67,12 +67,14 @@ class PipelineRunner {
       )
       const checkpointSteps = this.steps.map((step, i) => {
         const agent = this.agentSnapshots.get(step.agent_id)
+        // Initialize step status in memory
+        step.status = i < startIndex ? STEP_STATUSES.COMPLETE : STEP_STATUSES.IDLE
         return {
           agent_id: step.agent_id,
           agent_name: agent?.name || 'Unknown',
           started_at: null,
           completed_at: null,
-          status: i < startIndex ? STEP_STATUSES.COMPLETE : STEP_STATUSES.IDLE,
+          status: step.status,
         }
       })
 
@@ -191,6 +193,9 @@ class PipelineRunner {
         await ActivityLog.append(this.currentProjectPath, `${agent.name} completed`, logType)
       }
 
+      // Update in-memory status
+      this.steps[i].status = stepStatus
+
       // Update checkpoint
       await Checkpoint.updateStep(this.currentProjectPath, i, {
         status: stepStatus,
@@ -303,32 +308,40 @@ class PipelineRunner {
   }
 
   /**
-   * Skip the next pending agent in the pipeline
-   * @returns {Promise<{ok: boolean, error?: string, skippedIndex?: number}>}
+   * Skip a specific agent by step index
+   * @param {number} stepIndex - Index of the step to skip
+   * @returns {Promise<{ok: boolean, error?: string, agentName?: string}>}
    */
-  async skipNext() {
-    // Can only skip when pipeline is paused at a transition
+  async skipAgent(stepIndex) {
+    // Can only skip when pipeline is paused
     if (this.state !== PIPELINE_STATES.PAUSED) {
       return { ok: false, error: 'Pipeline must be paused to skip an agent' }
     }
 
-    // Find the next pending step (after currentStepIndex, not complete, not skipped)
-    const nextPendingIndex = this.steps.findIndex((step, i) => {
-      // Skip only pending steps that haven't run yet
-      if (i <= this.currentStepIndex) return false
-      return true
-    })
-
-    if (nextPendingIndex === -1) {
-      return { ok: false, error: 'No pending agents to skip' }
+    // Validate step index
+    if (stepIndex < 0 || stepIndex >= this.steps.length) {
+      return { ok: false, error: 'Invalid step index' }
     }
 
-    const step = this.steps[nextPendingIndex]
+    const step = this.steps[stepIndex]
+
+    // Can't skip already completed or skipped agents
+    if (step.status === STEP_STATUSES.COMPLETE || step.status === STEP_STATUSES.ERROR) {
+      return { ok: false, error: 'Cannot skip a completed agent' }
+    }
+
+    if (step.status === STEP_STATUSES.SKIPPED) {
+      return { ok: false, error: 'Agent is already skipped' }
+    }
+
     const agent = this.agentSnapshots.get(step.agent_id)
+
+    // Update in-memory status
+    step.status = STEP_STATUSES.SKIPPED
 
     // Update checkpoint to mark step as skipped
     const Checkpoint = require('../checkpoint/Checkpoint')
-    await Checkpoint.updateStep(this.currentProjectPath, nextPendingIndex, {
+    await Checkpoint.updateStep(this.currentProjectPath, stepIndex, {
       status: STEP_STATUSES.SKIPPED,
       completed_at: new Date().toISOString(),
     })
@@ -340,7 +353,52 @@ class PipelineRunner {
     // Notify renderer
     this._notifyStatus()
 
-    return { ok: true, skippedIndex: nextPendingIndex, agentName: agent?.name || 'Unknown' }
+    return { ok: true, agentName: agent?.name || 'Unknown' }
+  }
+
+  /**
+   * Unskip a specific agent by step index
+   * @param {number} stepIndex - Index of the step to unskip
+   * @returns {Promise<{ok: boolean, error?: string, agentName?: string}>}
+   */
+  async unskipAgent(stepIndex) {
+    // Can only unskip when pipeline is paused
+    if (this.state !== PIPELINE_STATES.PAUSED) {
+      return { ok: false, error: 'Pipeline must be paused to unskip an agent' }
+    }
+
+    // Validate step index
+    if (stepIndex < 0 || stepIndex >= this.steps.length) {
+      return { ok: false, error: 'Invalid step index' }
+    }
+
+    const step = this.steps[stepIndex]
+
+    // Can only unskip skipped agents
+    if (step.status !== STEP_STATUSES.SKIPPED) {
+      return { ok: false, error: 'Agent is not skipped' }
+    }
+
+    const agent = this.agentSnapshots.get(step.agent_id)
+
+    // Update in-memory status
+    step.status = STEP_STATUSES.IDLE
+
+    // Update checkpoint to mark step as idle
+    const Checkpoint = require('../checkpoint/Checkpoint')
+    await Checkpoint.updateStep(this.currentProjectPath, stepIndex, {
+      status: STEP_STATUSES.IDLE,
+      completed_at: null,
+    })
+
+    // Log the unskip
+    const ActivityLog = require('./ActivityLog')
+    await ActivityLog.append(this.currentProjectPath, `${agent?.name || 'Unknown'} unskipped`, 'info')
+
+    // Notify renderer
+    this._notifyStatus()
+
+    return { ok: true, agentName: agent?.name || 'Unknown' }
   }
 
   /**
@@ -362,21 +420,14 @@ class PipelineRunner {
   _notifyStatus() {
     if (!this.currentWin) return
 
-    // Load checkpoint to get step statuses
-    const Checkpoint = require('../checkpoint/Checkpoint')
-    const checkpointData = Checkpoint.load(this.currentProjectPath)
-
     const checkpoint = {
       state: this.state,
       currentStepIndex: this.currentStepIndex,
-      steps: this.steps.map((step, i) => {
-        const stepStatus = checkpointData?.steps?.[i]?.status || STEP_STATUSES.IDLE
-        return {
-          ...step,
-          agent_name: this.agentSnapshots.get(step.agent_id)?.name || 'Unknown',
-          status: stepStatus,
-        }
-      }),
+      steps: this.steps.map((step, i) => ({
+        ...step,
+        agent_name: this.agentSnapshots.get(step.agent_id)?.name || 'Unknown',
+        status: step.status || STEP_STATUSES.IDLE,
+      })),
     }
 
     this.currentWin.webContents.send(IPC.PIPELINE_STATUS, checkpoint)

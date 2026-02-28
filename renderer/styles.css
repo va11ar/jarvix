@@ -503,9 +503,9 @@ html, body {
 }
 .pipeline-node.complete { border-color: var(--green-dim); }
 .pipeline-node.error    { border-color: var(--red); box-shadow: 0 0 12px -4px var(--red); }
+.pipeline-node.idle     { border-color: var(--border2); }
 .pipeline-node.skipped  { border-color: var(--yellow-dim); opacity: 0.55; }
 .pipeline-node.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent-dim); }
-.pipeline-node.idle { border-color: var(--border2); }
 
 @keyframes node-pulse {
   0%, 100% { box-shadow: 0 0 6px -2px var(--amber-dim); }

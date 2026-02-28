@@ -41,7 +41,8 @@ const IPC = {
   PIPELINE_RESUME: 'pipeline:resume',
   PIPELINE_ABORT: 'pipeline:abort',
   PIPELINE_UPDATE_STEPS: 'pipeline:update-steps',
-  PIPELINE_SKIP_NEXT: 'pipeline:skip-next',
+  PIPELINE_SKIP_AGENT: 'pipeline:skip-agent',
+  PIPELINE_UNSKIP_AGENT: 'pipeline:unskip-agent',
   AGENT_KILL: 'agent:kill',
 
   // Editor
