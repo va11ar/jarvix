@@ -41,6 +41,7 @@ const IPC = {
   PIPELINE_RESUME: 'pipeline:resume',
   PIPELINE_ABORT: 'pipeline:abort',
   PIPELINE_UPDATE_STEPS: 'pipeline:update-steps',
+  PIPELINE_SKIP_NEXT: 'pipeline:skip-next',
   AGENT_KILL: 'agent:kill',
 
   // Editor
@@ -58,6 +59,11 @@ const IPC = {
   // Settings
   SETTINGS_GET: 'settings:get',
   SETTINGS_SET: 'settings:set',
+
+  // Authentication
+  AUTH_CHECK: 'auth:check',
+  AUTH_CONFIGURE: 'auth:configure',
+  AUTH_TEST: 'auth:test',
 
   // Window controls
   WINDOW_MINIMIZE: 'window:minimize',

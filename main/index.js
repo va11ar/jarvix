@@ -4,6 +4,7 @@ const { registerIpcHandlers } = require('./ipc')
 const ProjectManager = require('./project/ProjectManager')
 const Checkpoint = require('./checkpoint/Checkpoint')
 const Settings = require('./settings')
+const { validateQwenAuth } = require('./auth')
 
 let win
 
@@ -28,15 +29,6 @@ function createWindow() {
 
 app.whenReady().then(async () => {
   createWindow()
-
-  // Startup: validate Qwen auth settings
-  const settings = await Settings.load()
-  const authValid = await validateQwenAuth()
-  if (!authValid) {
-    win.webContents.once('did-finish-load', () => {
-      win.webContents.send('startup:auth-invalid')
-    })
-  }
 
   // Startup: detect incomplete runs across all known projects
   const projects = await ProjectManager.listAll()
@@ -70,20 +62,5 @@ app.on('before-quit', () => {
   const runner = require('./pipeline/PipelineRunner')
   if (runner.running) runner.abort()
 })
-
-// Validate that ~/.qwen/settings.json exists and has required fields
-async function validateQwenAuth() {
-  const fs = require('fs/promises')
-  const os = require('os')
-  try {
-    const raw = await fs.readFile(path.join(os.homedir(), '.qwen', 'settings.json'), 'utf8')
-    const s = JSON.parse(raw)
-    const hasAuth = s?.security?.auth?.selectedType || s?.selectedType
-    const hasModel = s?.model?.name || s?.modelProviders
-    return !!(hasAuth && hasModel)
-  } catch {
-    return false
-  }
-}
 
 module.exports = { getWin: () => win }

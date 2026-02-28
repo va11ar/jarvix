@@ -86,8 +86,6 @@
           <button class="pipe-btn" id="btn-create-agent">Create Agent</button>
           <button class="pipe-btn" id="btn-add-agent">Add Agent</button>
           <button class="pipe-btn" id="btn-remove-agent" disabled>Remove Agent</button>
-          <button class="pipe-btn" id="btn-reorder" disabled>Reorder</button>
-          <button class="pipe-btn" id="btn-reroute" disabled>Reroute</button>
           <button class="pipe-btn" id="btn-skip-next" disabled>Skip Next</button>
         </div>
       </div>
@@ -354,6 +352,76 @@
       <div class="dialog-footer">
         <button class="footer-btn" id="btn-edit-cancel-changes">Cancel Changes</button>
         <button class="footer-btn primary" id="btn-edit-confirm-changes">Confirm Changes</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Auth Warning Dialog -->
+  <div class="overlay hidden" id="dialog-auth-warning">
+    <div class="dialog" style="width:420px;">
+      <div class="dialog-header">
+        <div class="dialog-title">Authentication Required</div>
+      </div>
+      <div class="dialog-body" style="padding:16px;">
+        <p style="color:var(--text-dim);margin-bottom:12px;">
+          Authentication with an AI provider is not setup. The pipeline can't run without one.
+        </p>
+        <p style="color:var(--text-faint);font-size:10px;margin-bottom:16px;">
+          Do you want to set it up now?
+        </p>
+      </div>
+      <div class="dialog-footer">
+        <button class="footer-btn" id="btn-auth-warning-cancel">Cancel</button>
+        <button class="footer-btn primary" id="btn-auth-warning-setup">Setup</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Auth Setup Dialog -->
+  <div class="overlay hidden" id="dialog-auth-setup">
+    <div class="dialog" style="width:480px;">
+      <div class="dialog-header">
+        <div class="dialog-title">Setup Authentication</div>
+        <div class="dialog-subtitle">Configure your AI provider credentials</div>
+      </div>
+      <div class="dialog-body" style="padding:16px;">
+        <div class="dialog-row" style="margin-bottom:16px;">
+          <label style="display:block;font-size:10px;color:var(--text-faint);margin-bottom:6px;">Provider</label>
+          <select class="dialog-input" id="auth-provider" style="width:100%;background:var(--bg2);border:1px solid var(--border);color:var(--text);padding:8px;border-radius:4px;">
+            <option value="openai">OpenAI</option>
+            <option value="modelscope">ModelScope</option>
+            <option value="openrouter">OpenRouter</option>
+            <option value="alibaba">Alibaba Cloud Bailian</option>
+            <option value="azure">Azure OpenAI</option>
+            <option value="custom">Custom Provider</option>
+          </select>
+        </div>
+
+        <div class="dialog-row" style="margin-bottom:16px;">
+          <label style="display:block;font-size:10px;color:var(--text-faint);margin-bottom:6px;">API Key</label>
+          <input class="dialog-input" id="auth-api-key" type="password" placeholder="sk-..." style="width:100%;box-sizing:border-box;">
+        </div>
+
+        <div style="margin-bottom:16px;">
+          <label style="display:block;font-size:10px;color:var(--text-faint);margin-bottom:6px;">Base URL (optional)</label>
+          <input class="dialog-input" id="auth-base-url" type="text" placeholder="https://api.openai.com/v1" style="width:100%;box-sizing:border-box;">
+          <p style="color:var(--text-faint);font-size:9px;margin-top:6px;display:block;">The API endpoint URL. Auto-fills based on provider.</p>
+        </div>
+
+        <div class="dialog-row" style="margin-bottom:16px;">
+          <label style="display:block;font-size:10px;color:var(--text-faint);margin-bottom:6px;">Model Name (optional)</label>
+          <input class="dialog-input" id="auth-model-name" type="text" placeholder="gpt-4, qwen3-coder-plus, etc." style="width:100%;box-sizing:border-box;">
+        </div>
+
+        <div class="dialog-row" style="margin-bottom:8px;">
+          <button class="footer-btn" id="btn-auth-test" style="width:100%;">Test Connection</button>
+        </div>
+        <div id="auth-test-result" style="font-size:10px;min-height:14px;"></div>
+        <p id="auth-test-note" style="color:var(--text-faint);font-size:9px;margin-top:8px;display:none;">Note: Azure OpenAI requires a chat completion test which may incur minimal cost.</p>
+      </div>
+      <div class="dialog-footer">
+        <button class="footer-btn" id="btn-auth-setup-cancel">Cancel</button>
+        <button class="footer-btn primary" id="btn-auth-setup-save" disabled>Save</button>
       </div>
     </div>
   </div>

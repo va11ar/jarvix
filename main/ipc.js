@@ -6,6 +6,7 @@ const AgentLibrary = require('./project/AgentLibrary')
 const PipelineRunner = require('./pipeline/PipelineRunner')
 const AgentEditor = require('./editor/AgentEditor')
 const Settings = require('./settings')
+const { validateQwenAuth, configureQwenAuth, testQwenAuth } = require('./auth')
 const CONSTANTS = require('./constants')
 
 // Every handler follows the same pattern: async, try/catch, return { error } on failure.
@@ -73,6 +74,7 @@ function registerIpcHandlers(win) {
   ipcMain.handle('pipeline:resume',       h(() => PipelineRunner.resume()))
   ipcMain.handle('pipeline:abort',        h(() => PipelineRunner.abort()))
   ipcMain.handle('pipeline:update-steps', h(({ steps }) => PipelineRunner.updateSteps(steps)))
+  ipcMain.handle('pipeline:skip-next',    h(() => PipelineRunner.skipNext()))
   ipcMain.handle('agent:kill',            h(() => PipelineRunner.killCurrent()))
 
   // ── Editor ───────────────────────────────────────────────────────────────
@@ -96,6 +98,14 @@ function registerIpcHandlers(win) {
   // ── Settings ─────────────────────────────────────────────────────────────
   ipcMain.handle('settings:get', h(() => Settings.load()))
   ipcMain.handle('settings:set', h((data) => Settings.save(data)))
+
+  // ── Authentication ───────────────────────────────────────────────────────
+  ipcMain.handle('auth:check', h(async () => {
+    const isValid = await validateQwenAuth()
+    return { configured: isValid }
+  }))
+  ipcMain.handle('auth:configure', h((config) => configureQwenAuth(config)))
+  ipcMain.handle('auth:test', h((config) => testQwenAuth(config)))
 
   // ── Window controls (custom frame) ────────────────────────────────────────
   ipcMain.handle('window:minimize', h(() => win.minimize()))

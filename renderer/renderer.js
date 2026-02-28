@@ -91,12 +91,6 @@ function setupIPCListeners() {
     handleIncompleteRunDetected(data)
   })
 
-  window.api.onAuthInvalid((data) => {
-    // Auth check on startup - don't show as error, just note it
-    // Auth is only required when running pipelines, not for opening projects
-    state.qwenAuthConfigured = false
-  })
-
   window.api.onWindowFocus(() => {
     handleWindowFocus()
   })
@@ -127,9 +121,7 @@ function wireEventListeners() {
   // Pipeline structure buttons
   document.getElementById('btn-add-agent').addEventListener('click', openAddAgentDialog)
   document.getElementById('btn-remove-agent').addEventListener('click', handleRemoveAgent)
-  document.getElementById('btn-reorder').addEventListener('click', handleReorder)
-  document.getElementById('btn-reroute').addEventListener('click', () => appendLogLine('Reroute not implemented', 'warn'))
-  document.getElementById('btn-skip-next').addEventListener('click', () => appendLogLine('Skip Next not implemented', 'warn'))
+  document.getElementById('btn-skip-next').addEventListener('click', handleSkipNext)
 
   // Add Agent dialog cancel button
   document.getElementById('btn-add-agent-cancel').addEventListener('click', () => {
@@ -242,6 +234,7 @@ function handlePipelineStatus(data) {
   renderPipelineCanvas()
   updateDetailPanel()
   updateAgentControls()
+  setPipelineControlsDisabled(state.pipelineSteps.length === 0)
 }
 
 // ─── Agent Definition Changed Handler ───────────────────────────────────────
@@ -304,15 +297,26 @@ function updateTitlebarStatus() {
   pill.textContent = statusText
 
   // Show/hide buttons based on pipeline state
-  // Start: visible when idle, hidden when running or paused
-  // Pause: visible when running, hidden when idle or paused
+  // Start: visible when idle or complete, hidden when running or paused
+  // Pause: visible when running or paused, hidden when idle or complete
+  // Pause icon: ⏸ when running (to pause), ▶ when paused (to resume)
   if (state.pipelineState === 'running') {
     startBtn.style.display = 'none'
     pauseBtn.style.display = 'flex'
     pauseIcon.textContent = '⏸'
     pauseBtn.classList.remove('paused')
+    pauseBtn.setAttribute('data-tip', 'Pause')
+    pauseBtn.setAttribute('aria-label', 'Pause')
   } else if (state.pipelineState === 'paused') {
     startBtn.style.display = 'none'
+    pauseBtn.style.display = 'flex'
+    pauseIcon.textContent = '▶'
+    pauseBtn.classList.add('paused')
+    pauseBtn.setAttribute('data-tip', 'Resume')
+    pauseBtn.setAttribute('aria-label', 'Resume')
+  } else if (state.pipelineState === 'complete') {
+    // Pipeline complete - show Start button to re-run, hide pause
+    startBtn.style.display = 'flex'
     pauseBtn.style.display = 'none'
   } else {
     // idle
@@ -320,6 +324,8 @@ function updateTitlebarStatus() {
     pauseBtn.style.display = 'flex'
     pauseIcon.textContent = '⏸'
     pauseBtn.classList.remove('paused')
+    pauseBtn.setAttribute('data-tip', 'Pause')
+    pauseBtn.setAttribute('aria-label', 'Pause')
   }
 }
 
@@ -354,8 +360,14 @@ function renderPipelineAgents() {
     item.dataset.index = index
     item.setAttribute('draggable', 'true')
 
+    // Check for skipped status first
+    const isSkipped = step.status === 'skipped'
+
     // Determine state class
-    if (index < state.currentStepIndex) {
+    // When pipeline is complete, all steps are complete
+    if (isSkipped) {
+      item.classList.add('skipped')
+    } else if (state.pipelineState === 'complete' || index < state.currentStepIndex) {
       item.classList.add('complete')
     } else if (index === state.currentStepIndex) {
       if (state.pipelineState === 'running') {
@@ -369,7 +381,9 @@ function renderPipelineAgents() {
       item.classList.add('selected')
     }
 
-    const stateTag = index < state.currentStepIndex ? 'done' :
+    // State tag: all done when complete, otherwise based on currentStepIndex
+    const stateTag = isSkipped ? 'skip' :
+                     (state.pipelineState === 'complete' || index < state.currentStepIndex) ? 'done' :
                      index === state.currentStepIndex ? 'run' : 'idle'
 
     // Selection indicator: triangle for selected, nothing for others
@@ -403,18 +417,45 @@ function renderPipelineAgents() {
 function setPipelineControlsDisabled(disabled) {
   // Add Agent and Create Agent are always enabled
   const alwaysEnabled = ['btn-add-agent', 'btn-create-agent']
-  const disableWhenEmpty = ['btn-remove-agent', 'btn-reorder', 'btn-reroute', 'btn-skip-next']
-  
+  // These are disabled when pipeline is empty
+  const disableWhenEmpty = ['btn-remove-agent']
+  // These require pipeline to be paused AND have pending agents
+  const disableWhenNotPaused = ['btn-skip-next']
+
   // Always enable these buttons
   alwaysEnabled.forEach(id => {
     const btn = document.getElementById(id)
     if (btn) btn.disabled = false
   })
-  
-  // Disable/enable these based on pipeline state
+
+  // Disable/enable based on whether pipeline has agents
   disableWhenEmpty.forEach(id => {
     const btn = document.getElementById(id)
     if (btn) btn.disabled = disabled
+  })
+
+  // Disable/enable based on pipeline state
+  disableWhenNotPaused.forEach(id => {
+    const btn = document.getElementById(id)
+    if (btn) {
+      // Skip Next requires: paused state AND pending agents exist
+      const hasPendingAgents = state.pipelineSteps.some((step, i) => i > state.currentStepIndex)
+      
+      if (state.pipelineState === 'running') {
+        btn.disabled = true
+        btn.setAttribute('data-tip', 'You cannot skip the next agent while the pipeline is active')
+      } else if (state.pipelineState === 'idle' || state.pipelineState === 'complete') {
+        btn.disabled = true
+        btn.setAttribute('data-tip', 'Pipeline must be paused to skip an agent')
+      } else if (!hasPendingAgents) {
+        btn.disabled = true
+        btn.setAttribute('data-tip', 'No pending agents to skip')
+      } else {
+        // Enabled - paused with pending agents
+        btn.disabled = false
+        btn.setAttribute('data-tip', 'Skip the next pending agent')
+      }
+    }
   })
 }
 
@@ -471,7 +512,13 @@ function renderPipelineCanvas() {
     node.dataset.index = index
     node.dataset.agentId = step.agent_id
 
-    if (index < state.currentStepIndex) {
+    // Check for skipped status first
+    const isSkipped = step.status === 'skipped'
+
+    // When pipeline is complete, all nodes are complete
+    if (isSkipped) {
+      node.classList.add('skipped')
+    } else if (state.pipelineState === 'complete' || index < state.currentStepIndex) {
       node.classList.add('complete')
     } else if (index === state.currentStepIndex) {
       if (state.pipelineState === 'running') {
@@ -485,7 +532,9 @@ function renderPipelineCanvas() {
       node.classList.add('selected')
     }
 
-    const statusText = index < state.currentStepIndex ? 'Complete' :
+    // Status text: all Complete when pipeline is complete
+    const statusText = isSkipped ? 'Skipped' :
+                       (state.pipelineState === 'complete' || index < state.currentStepIndex) ? 'Complete' :
                        index === state.currentStepIndex ? (state.pipelineState === 'running' ? 'Running…' : state.pipelineState) :
                        'Idle'
 
@@ -506,7 +555,8 @@ function renderPipelineCanvas() {
     if (index < state.pipelineSteps.length - 1) {
       const connector = document.createElement('div')
       connector.className = 'connector'
-      if (index < state.currentStepIndex) {
+      // All connectors are done when pipeline is complete
+      if (state.pipelineState === 'complete' || index < state.currentStepIndex) {
         connector.classList.add('done')
       } else if (index === state.currentStepIndex && state.pipelineState === 'running') {
         connector.classList.add('active')
@@ -640,7 +690,11 @@ async function updateDetailPanel(libraryAgent = null) {
   const agent = state.agents.find(a => a.id === step.agent_id)
 
   document.getElementById('detail-agent-name').textContent = agent?.name || step.agent_name || 'Unknown'
-  document.getElementById('detail-status').textContent = index < state.currentStepIndex ? 'Complete' :
+  
+  // Check for skipped status
+  const isSkipped = step.status === 'skipped'
+  document.getElementById('detail-status').textContent = isSkipped ? 'Skipped' :
+                                                         index < state.currentStepIndex ? 'Complete' :
                                                          index === state.currentStepIndex ? state.pipelineState : 'Idle'
   document.getElementById('detail-timeout').textContent = agent ? `${agent.timeout_seconds}s` : '—'
   document.getElementById('detail-reads').textContent = agent?.reads?.length ? `${agent.reads.length} files` : 'None'
@@ -717,6 +771,19 @@ async function handleStart() {
     appendLogLine('No agents in pipeline. Add agents before starting.', 'warn')
     return
   }
+
+  // Check auth before starting pipeline
+  try {
+    const authResult = await window.api.checkAuth()
+    if (!authResult.configured) {
+      showDialog('dialog-auth-warning')
+      return
+    }
+  } catch (e) {
+    appendLogLine('Failed to check auth: ' + e.message, 'error')
+    return
+  }
+
   await startPipeline()
 }
 
@@ -1341,14 +1408,47 @@ async function handleRemoveAgent() {
   }
 }
 
-function handleReorder() {
-  // Check if pipeline is running
-  if (state.pipelineState === 'running') {
-    showDialog('dialog-reorder-warning')
+async function handleSkipNext() {
+  // Can only skip when pipeline is paused
+  if (state.pipelineState !== 'paused') {
+    appendLogLine('Pipeline must be paused to skip an agent', 'warn')
     return
   }
 
-  appendLogLine('Drag agents in the Agents pane to reorder them', 'info')
+  // Check if there are pending agents to skip
+  if (state.pipelineSteps.length === 0) {
+    appendLogLine('No agents in pipeline', 'warn')
+    return
+  }
+
+  // Find the next pending agent (after currentStepIndex)
+  const nextPendingIndex = state.pipelineSteps.findIndex((step, i) => i > state.currentStepIndex)
+
+  if (nextPendingIndex === -1) {
+    appendLogLine('No pending agents to skip', 'warn')
+    return
+  }
+
+  const agentName = state.pipelineSteps[nextPendingIndex].agent_name || 'Unknown'
+
+  try {
+    // Call the main process to skip the agent
+    const result = await window.api.skipNextAgent()
+
+    if (result.error) {
+      appendLogLine('Failed to skip agent: ' + result.error, 'error')
+      return
+    }
+
+    appendLogLine(`Skipped "${agentName}"`, 'warn')
+
+    // Re-render UI to reflect the skipped state
+    renderPipelineAgents()
+    renderPipelineCanvas()
+    updateDetailPanel()
+  } catch (e) {
+    appendLogLine('Failed to skip agent: ' + e.message, 'error')
+  }
 }
 
 // Shared drag state
@@ -1543,10 +1643,32 @@ function wireNewProjectDialog() {
     }
   })
 
-  // Reorder warning dialog
-  document.getElementById('btn-reorder-warning-ok').addEventListener('click', () => {
-    hideDialog('dialog-reorder-warning')
+  // Auth warning dialog
+  document.getElementById('btn-auth-warning-cancel').addEventListener('click', () => {
+    hideDialog('dialog-auth-warning')
   })
+
+  document.getElementById('btn-auth-warning-setup').addEventListener('click', () => {
+    hideDialog('dialog-auth-warning')
+    showAuthSetupDialog()
+  })
+
+  // Auth setup dialog
+  document.getElementById('btn-auth-setup-cancel').addEventListener('click', () => {
+    hideDialog('dialog-auth-setup')
+  })
+
+  document.getElementById('btn-auth-setup-save').addEventListener('click', handleAuthSave)
+
+  document.getElementById('btn-auth-test').addEventListener('click', handleAuthTest)
+
+  // Provider dropdown - update base URL when provider changes
+  document.getElementById('auth-provider').addEventListener('change', handleProviderChange)
+
+  // Disable Save button when any input field changes (require re-test)
+  document.getElementById('auth-api-key').addEventListener('input', () => setAuthSaveEnabled(false))
+  document.getElementById('auth-base-url').addEventListener('input', () => setAuthSaveEnabled(false))
+  document.getElementById('auth-model-name').addEventListener('input', () => setAuthSaveEnabled(false))
 }
 
 // ─── Dialog Utilities ───────────────────────────────────────────────────────
@@ -1583,14 +1705,119 @@ async function handleCancelChanges() {
 
 // ─── Start Pipeline ─────────────────────────────────────────────────────────
 
-async function startPipeline(resumeFrom = null) {
-  if (!state.currentProject) return
+// Default base URLs for each provider
+const PROVIDER_BASE_URLS = {
+  'openai': 'https://api.openai.com/v1',
+  'modelscope': 'https://api-inference.modelscope.cn/v1',
+  'openrouter': 'https://openrouter.ai/api/v1',
+  'alibaba': 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+  'azure': 'https://api.openai.com/v1',
+  'custom': '',
+}
 
-  // Check auth before starting pipeline
-  if (!state.qwenAuthConfigured) {
-    appendLogLine('Qwen CLI authentication not configured. Please set up ~/.qwen/settings.json before running pipelines.', 'error')
+function showAuthSetupDialog() {
+  showDialog('dialog-auth-setup')
+  // Reset form
+  document.getElementById('auth-provider').value = 'openai'
+  document.getElementById('auth-api-key').value = ''
+  document.getElementById('auth-base-url').value = PROVIDER_BASE_URLS.openai
+  document.getElementById('auth-model-name').value = ''
+  document.getElementById('auth-test-result').textContent = ''
+  document.getElementById('auth-test-result').className = ''
+  // Disable Save button until test passes
+  document.getElementById('btn-auth-setup-save').disabled = true
+}
+
+function setAuthSaveEnabled(enabled) {
+  document.getElementById('btn-auth-setup-save').disabled = !enabled
+}
+
+function handleProviderChange() {
+  const provider = document.getElementById('auth-provider').value
+  const baseUrlInput = document.getElementById('auth-base-url')
+  // Always set the default base URL for the selected provider
+  // This ensures correct endpoint even if user had edited the field
+  if (PROVIDER_BASE_URLS[provider]) {
+    baseUrlInput.value = PROVIDER_BASE_URLS[provider]
+  }
+  // Show note for Azure (requires chat completion test)
+  const noteEl = document.getElementById('auth-test-note')
+  noteEl.style.display = (provider === 'azure') ? 'block' : 'none'
+  // Disable Save button when provider changes (require re-test)
+  setAuthSaveEnabled(false)
+}
+
+async function handleAuthTest() {
+  const provider = document.getElementById('auth-provider').value
+  const apiKey = document.getElementById('auth-api-key').value
+  const baseUrl = document.getElementById('auth-base-url').value
+  const modelName = document.getElementById('auth-model-name').value
+
+  const resultEl = document.getElementById('auth-test-result')
+
+  if (!apiKey) {
+    resultEl.textContent = 'Please enter an API key'
+    resultEl.className = 'error'
+    setAuthSaveEnabled(false)
     return
   }
+
+  if (!modelName || modelName.trim() === '') {
+    resultEl.textContent = 'Model name is empty'
+    resultEl.className = 'error'
+    setAuthSaveEnabled(false)
+    return
+  }
+
+  resultEl.textContent = 'Testing connection...'
+  resultEl.className = ''
+  setAuthSaveEnabled(false)
+
+  try {
+    const result = await window.api.testAuth({ provider, apiKey, baseUrl, modelName })
+    if (result.ok) {
+      resultEl.textContent = result.message || 'Connection successful'
+      resultEl.className = 'ok'
+      setAuthSaveEnabled(true)
+    } else {
+      resultEl.textContent = result.error || 'Connection failed'
+      resultEl.className = 'error'
+      setAuthSaveEnabled(false)
+    }
+  } catch (e) {
+    resultEl.textContent = 'Test failed: ' + e.message
+    resultEl.className = 'error'
+    setAuthSaveEnabled(false)
+  }
+}
+
+async function handleAuthSave() {
+  const provider = document.getElementById('auth-provider').value
+  const apiKey = document.getElementById('auth-api-key').value
+  const baseUrl = document.getElementById('auth-base-url').value
+  const modelName = document.getElementById('auth-model-name').value
+
+  if (!apiKey) {
+    appendLogLine('API key is required', 'error')
+    return
+  }
+
+  try {
+    const result = await window.api.configureAuth({ provider, apiKey, baseUrl, modelName })
+    if (result.ok) {
+      state.qwenAuthConfigured = true
+      appendLogLine('Authentication configured successfully', 'ok')
+      hideDialog('dialog-auth-setup')
+    } else {
+      appendLogLine('Failed to configure auth: ' + result.error, 'error')
+    }
+  } catch (e) {
+    appendLogLine('Failed to configure auth: ' + e.message, 'error')
+  }
+}
+
+async function startPipeline(resumeFrom = null) {
+  if (!state.currentProject) return
 
   try {
     const result = await window.api.startPipeline(state.currentProject.projectPath, resumeFrom)

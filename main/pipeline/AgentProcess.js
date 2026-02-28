@@ -20,7 +20,7 @@ class AgentProcess {
     this.timeoutId = null
     this.exitCode = null
     this.status = null // PIPELINE_STATUS value
-    self.exitReason = null
+    this.exitReason = null
   }
 
   /**

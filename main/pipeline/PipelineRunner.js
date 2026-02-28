@@ -297,6 +297,50 @@ class PipelineRunner {
       await this.currentAgentProcess.kill()
       this.currentAgentProcess = null
     }
+    // After killing, pause the pipeline and notify renderer
+    this.state = PIPELINE_STATES.PAUSED
+    this._notifyStatus()
+  }
+
+  /**
+   * Skip the next pending agent in the pipeline
+   * @returns {Promise<{ok: boolean, error?: string, skippedIndex?: number}>}
+   */
+  async skipNext() {
+    // Can only skip when pipeline is paused at a transition
+    if (this.state !== PIPELINE_STATES.PAUSED) {
+      return { ok: false, error: 'Pipeline must be paused to skip an agent' }
+    }
+
+    // Find the next pending step (after currentStepIndex, not complete, not skipped)
+    const nextPendingIndex = this.steps.findIndex((step, i) => {
+      // Skip only pending steps that haven't run yet
+      if (i <= this.currentStepIndex) return false
+      return true
+    })
+
+    if (nextPendingIndex === -1) {
+      return { ok: false, error: 'No pending agents to skip' }
+    }
+
+    const step = this.steps[nextPendingIndex]
+    const agent = this.agentSnapshots.get(step.agent_id)
+
+    // Update checkpoint to mark step as skipped
+    const Checkpoint = require('../checkpoint/Checkpoint')
+    await Checkpoint.updateStep(this.currentProjectPath, nextPendingIndex, {
+      status: STEP_STATUSES.SKIPPED,
+      completed_at: new Date().toISOString(),
+    })
+
+    // Log the skip
+    const ActivityLog = require('./ActivityLog')
+    await ActivityLog.append(this.currentProjectPath, `${agent?.name || 'Unknown'} skipped`, 'warn')
+
+    // Notify renderer
+    this._notifyStatus()
+
+    return { ok: true, skippedIndex: nextPendingIndex, agentName: agent?.name || 'Unknown' }
   }
 
   /**
@@ -318,13 +362,21 @@ class PipelineRunner {
   _notifyStatus() {
     if (!this.currentWin) return
 
+    // Load checkpoint to get step statuses
+    const Checkpoint = require('../checkpoint/Checkpoint')
+    const checkpointData = Checkpoint.load(this.currentProjectPath)
+
     const checkpoint = {
       state: this.state,
       currentStepIndex: this.currentStepIndex,
-      steps: this.steps.map((step, i) => ({
-        ...step,
-        agent_name: this.agentSnapshots.get(step.agent_id)?.name || 'Unknown',
-      })),
+      steps: this.steps.map((step, i) => {
+        const stepStatus = checkpointData?.steps?.[i]?.status || STEP_STATUSES.IDLE
+        return {
+          ...step,
+          agent_name: this.agentSnapshots.get(step.agent_id)?.name || 'Unknown',
+          status: stepStatus,
+        }
+      }),
     }
 
     this.currentWin.webContents.send(IPC.PIPELINE_STATUS, checkpoint)

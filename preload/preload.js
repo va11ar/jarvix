@@ -26,6 +26,7 @@ contextBridge.exposeInMainWorld('api', {
   resumePipeline: () => ipcRenderer.invoke('pipeline:resume'),
   abortPipeline: () => ipcRenderer.invoke('pipeline:abort'),
   updatePipelineSteps: (steps) => ipcRenderer.invoke('pipeline:update-steps', { steps }),
+  skipNextAgent: () => ipcRenderer.invoke('pipeline:skip-next'),
   killAgent: () => ipcRenderer.invoke('agent:kill'),
 
   // Editor
@@ -45,6 +46,11 @@ contextBridge.exposeInMainWorld('api', {
   getSettings: () => ipcRenderer.invoke('settings:get'),
   saveSettings: (data) => ipcRenderer.invoke('settings:set', data),
 
+  // Authentication
+  checkAuth: () => ipcRenderer.invoke('auth:check'),
+  configureAuth: (config) => ipcRenderer.invoke('auth:configure', config),
+  testAuth: (config) => ipcRenderer.invoke('auth:test', config),
+
   // Window controls
   minimizeWindow: () => ipcRenderer.invoke('window:minimize'),
   maximizeWindow: () => ipcRenderer.invoke('window:maximize'),
@@ -56,7 +62,6 @@ contextBridge.exposeInMainWorld('api', {
   onLogUpdated: (cb) => ipcRenderer.on('log:updated', (_, data) => cb(data)),
   onAgentDefinitionChanged: (cb) => ipcRenderer.on('agent:definition-changed', (_, data) => cb(data)),
   onIncompleteRunDetected: (cb) => ipcRenderer.on('pipeline:incomplete-run-detected', (_, data) => cb(data)),
-  onAuthInvalid: (cb) => ipcRenderer.on('startup:auth-invalid', (_, data) => cb(data)),
   onWindowFocus: (cb) => ipcRenderer.on('window:focus', (_, data) => cb(data)),
 
   // Cleanup
