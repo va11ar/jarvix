@@ -439,27 +439,32 @@ function setPipelineControlsDisabled(disabled) {
   disableWhenNotPaused.forEach(id => {
     const btn = document.getElementById(id)
     if (btn) {
-      // Skip Agent requires: paused state AND a selected agent
-      if (state.pipelineState !== 'paused') {
+      const wrapper = btn.parentElement
+      // Skip Agent requires: pipeline NOT running AND a selected agent
+      if (state.pipelineState === 'running') {
         btn.disabled = true
-        btn.setAttribute('data-tip', 'Pipeline must be paused to skip an agent')
+        wrapper.setAttribute('data-tip', 'Pipeline must not be running to skip an agent')
       } else if (state.selectedNodeIndex === -1) {
         btn.disabled = true
-        btn.setAttribute('data-tip', 'Select an agent to skip or unskip')
+        wrapper.setAttribute('data-tip', 'You need to select an agent first before you can skip or unskip')
       } else {
         // Check the selected agent's status
         const selectedStep = state.pipelineSteps[state.selectedNodeIndex]
-        const isSkipped = selectedStep?.status === 'skipped'
-        const isComplete = selectedStep?.status === 'complete' || selectedStep?.status === 'error'
-        
+        // Defensive: handle missing step or status
+        const status = selectedStep?.status || 'idle'
+        const isSkipped = status === 'skipped'
+        const isComplete = status === 'complete' || status === 'error'
+
         if (isComplete) {
           btn.disabled = true
-          btn.setAttribute('data-tip', 'Cannot skip a completed agent')
+          wrapper.setAttribute('data-tip', 'Cannot skip a completed agent')
         } else {
           btn.disabled = false
-          btn.setAttribute('data-tip', isSkipped ? 'Unskip this agent' : 'Skip the selected agent')
+          wrapper.setAttribute('data-tip', isSkipped ? 'Unskip this agent' : 'Skip the selected agent')
         }
       }
+      // Update button text to match state
+      updateSkipAgentButtonText()
     }
   })
 }
@@ -611,6 +616,7 @@ function selectAgent(index) {
   })
 
   updateDetailPanel()
+  setPipelineControlsDisabled(state.pipelineSteps.length === 0)
 }
 
 function deselectAgent() {
@@ -634,6 +640,7 @@ function deselectAgent() {
   })
 
   updateDetailPanel()
+  setPipelineControlsDisabled(state.pipelineSteps.length === 0)
 }
 
 function selectLibraryAgent(agent) {
@@ -1432,9 +1439,9 @@ async function handleRemoveAgent() {
 }
 
 async function handleSkipAgent() {
-  // Can only skip/unskip when pipeline is paused
-  if (state.pipelineState !== 'paused') {
-    appendLogLine('Pipeline must be paused to skip an agent', 'warn')
+  // Can only skip/unskip when pipeline is NOT running
+  if (state.pipelineState === 'running') {
+    appendLogLine('Pipeline must not be running to skip an agent', 'warn')
     return
   }
 
@@ -1452,20 +1459,24 @@ async function handleSkipAgent() {
     let result
     if (isSkipped) {
       // Unskip the selected agent
-      result = await window.api.unskipAgent(state.selectedNodeIndex)
+      result = await window.api.unskipAgent(state.selectedNodeIndex, state.currentProject?.projectPath)
       if (result.error) {
         appendLogLine('Failed to unskip agent: ' + result.error, 'error')
         return
       }
       appendLogLine(`Unskipped "${agentName}"`, 'ok')
+      // Update local state immediately for responsive UI
+      state.pipelineSteps[state.selectedNodeIndex].status = 'idle'
     } else {
       // Skip the selected agent
-      result = await window.api.skipAgent(state.selectedNodeIndex)
+      result = await window.api.skipAgent(state.selectedNodeIndex, state.currentProject?.projectPath)
       if (result.error) {
         appendLogLine('Failed to skip agent: ' + result.error, 'error')
         return
       }
       appendLogLine(`Skipped "${agentName}"`, 'warn')
+      // Update local state immediately for responsive UI
+      state.pipelineSteps[state.selectedNodeIndex].status = 'skipped'
     }
 
     // Re-render UI to reflect the skipped state

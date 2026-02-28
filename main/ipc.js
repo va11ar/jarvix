@@ -74,8 +74,8 @@ function registerIpcHandlers(win) {
   ipcMain.handle('pipeline:resume',       h(() => PipelineRunner.resume()))
   ipcMain.handle('pipeline:abort',        h(() => PipelineRunner.abort()))
   ipcMain.handle('pipeline:update-steps', h(({ steps }) => PipelineRunner.updateSteps(steps)))
-  ipcMain.handle('pipeline:skip-agent',   h(({ stepIndex }) => PipelineRunner.skipAgent(stepIndex)))
-  ipcMain.handle('pipeline:unskip-agent', h(({ stepIndex }) => PipelineRunner.unskipAgent(stepIndex)))
+  ipcMain.handle('pipeline:skip-agent',   h(({ stepIndex, projectPath }) => PipelineRunner.skipAgent(stepIndex, projectPath)))
+  ipcMain.handle('pipeline:unskip-agent', h(({ stepIndex, projectPath }) => PipelineRunner.unskipAgent(stepIndex, projectPath)))
   ipcMain.handle('agent:kill',            h(() => PipelineRunner.killCurrent()))
 
   // ── Editor ───────────────────────────────────────────────────────────────

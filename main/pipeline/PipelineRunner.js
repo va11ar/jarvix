@@ -60,15 +60,35 @@ class PipelineRunner {
         startIndex = resumeFrom
       }
 
-      // Create initial checkpoint
+      // Load existing checkpoint if it exists (to preserve skipped status)
+      const existingCheckpoint = await Checkpoint.load(projectPath)
+
+      // Create initial checkpoint (or update existing)
       const runId = new Date().toISOString()
       const projectJson = JSON.parse(
         await require('fs/promises').readFile(path.join(projectPath, 'project.json'), 'utf8')
       )
       const checkpointSteps = this.steps.map((step, i) => {
         const agent = this.agentSnapshots.get(step.agent_id)
+        
+        // Check if there's existing status from a previous run/skip
+        let status = STEP_STATUSES.IDLE
+        if (existingCheckpoint?.steps?.[i]) {
+          // Preserve existing status (skipped, complete, error) from checkpoint
+          const existingStatus = existingCheckpoint.steps[i].status
+          if (existingStatus === STEP_STATUSES.SKIPPED || 
+              existingStatus === STEP_STATUSES.COMPLETE || 
+              existingStatus === STEP_STATUSES.ERROR) {
+            status = existingStatus
+          } else if (i < startIndex) {
+            status = STEP_STATUSES.COMPLETE
+          }
+        } else if (i < startIndex) {
+          status = STEP_STATUSES.COMPLETE
+        }
+        
         // Initialize step status in memory
-        step.status = i < startIndex ? STEP_STATUSES.COMPLETE : STEP_STATUSES.IDLE
+        step.status = status
         return {
           agent_id: step.agent_id,
           agent_name: agent?.name || 'Unknown',
@@ -82,7 +102,7 @@ class PipelineRunner {
         run_id: runId,
         pipeline: projectJson.name,
         steps: checkpointSteps,
-        revision_loop_count: 0,
+        revision_loop_count: existingCheckpoint?.revision_loop_count || 0,
       })
 
       // Log pipeline start
@@ -126,6 +146,17 @@ class PipelineRunner {
         await ActivityLog.append(this.currentProjectPath, `Agent not found: ${step.agent_id}`, 'error')
         this.state = PIPELINE_STATES.ERROR
         return
+      }
+
+      // Skip agents marked as SKIPPED
+      if (step.status === STEP_STATUSES.SKIPPED) {
+        await ActivityLog.append(this.currentProjectPath, `${agent.name} skipped`, 'warn')
+        await Checkpoint.updateStep(this.currentProjectPath, i, {
+          status: STEP_STATUSES.SKIPPED,
+          completed_at: new Date().toISOString(),
+        })
+        this._notifyStatus()
+        continue
       }
 
       // Update checkpoint
@@ -310,12 +341,38 @@ class PipelineRunner {
   /**
    * Skip a specific agent by step index
    * @param {number} stepIndex - Index of the step to skip
+   * @param {string} projectPath - Project path (optional, uses currentProjectPath if not provided)
    * @returns {Promise<{ok: boolean, error?: string, agentName?: string}>}
    */
-  async skipAgent(stepIndex) {
-    // Can only skip when pipeline is paused
-    if (this.state !== PIPELINE_STATES.PAUSED) {
-      return { ok: false, error: 'Pipeline must be paused to skip an agent' }
+  async skipAgent(stepIndex, projectPath) {
+    // Can only skip when pipeline is NOT running (idle, paused, or complete)
+    if (this.state === PIPELINE_STATES.RUNNING) {
+      return { ok: false, error: 'Pipeline must not be running to skip an agent' }
+    }
+
+    const targetPath = projectPath || this.currentProjectPath
+
+    // If steps not loaded (pipeline never started), load from disk
+    if (this.steps.length === 0 && targetPath) {
+      try {
+        const fs = require('fs/promises')
+        const pipelineJson = JSON.parse(
+          await fs.readFile(require('path').join(targetPath, 'Pipeline', 'pipeline.json'), 'utf8')
+        )
+        this.steps = (pipelineJson.steps || []).map(step => ({
+          ...step,
+          status: STEP_STATUSES.IDLE,
+        }))
+        // Load agent snapshots
+        this.agentSnapshots.clear()
+        const AgentLibrary = require('../project/AgentLibrary')
+        for (const step of this.steps) {
+          const agent = await AgentLibrary.getById(step.agent_id)
+          if (agent) this.agentSnapshots.set(step.agent_id, agent)
+        }
+      } catch (e) {
+        return { ok: false, error: 'Failed to load pipeline configuration' }
+      }
     }
 
     // Validate step index
@@ -339,19 +396,40 @@ class PipelineRunner {
     // Update in-memory status
     step.status = STEP_STATUSES.SKIPPED
 
-    // Update checkpoint to mark step as skipped
-    const Checkpoint = require('../checkpoint/Checkpoint')
-    await Checkpoint.updateStep(this.currentProjectPath, stepIndex, {
-      status: STEP_STATUSES.SKIPPED,
-      completed_at: new Date().toISOString(),
-    })
+    // Initialize checkpoint if needed and update
+    let checkpoint = await Checkpoint.load(targetPath)
+    if (!checkpoint) {
+      const fs = require('fs/promises')
+      const projectJson = JSON.parse(
+        await fs.readFile(require('path').join(targetPath, 'project.json'), 'utf8')
+      )
+      await Checkpoint.save(targetPath, {
+        run_id: new Date().toISOString(),
+        pipeline: projectJson.name,
+        steps: this.steps.map(s => ({
+          agent_id: s.agent_id,
+          agent_name: this.agentSnapshots.get(s.agent_id)?.name || 'Unknown',
+          started_at: null,
+          completed_at: null,
+          status: s.status || STEP_STATUSES.IDLE,
+        })),
+        revision_loop_count: 0,
+      })
+    } else {
+      await Checkpoint.updateStep(targetPath, stepIndex, {
+        status: STEP_STATUSES.SKIPPED,
+        completed_at: new Date().toISOString(),
+      })
+    }
 
     // Log the skip
     const ActivityLog = require('./ActivityLog')
-    await ActivityLog.append(this.currentProjectPath, `${agent?.name || 'Unknown'} skipped`, 'warn')
+    await ActivityLog.append(targetPath, `${agent?.name || 'Unknown'} skipped`, 'warn')
 
-    // Notify renderer
-    this._notifyStatus()
+    // Notify renderer if we have a window
+    if (this.currentWin) {
+      this._notifyStatus()
+    }
 
     return { ok: true, agentName: agent?.name || 'Unknown' }
   }
@@ -359,12 +437,38 @@ class PipelineRunner {
   /**
    * Unskip a specific agent by step index
    * @param {number} stepIndex - Index of the step to unskip
+   * @param {string} projectPath - Project path (optional, uses currentProjectPath if not provided)
    * @returns {Promise<{ok: boolean, error?: string, agentName?: string}>}
    */
-  async unskipAgent(stepIndex) {
-    // Can only unskip when pipeline is paused
-    if (this.state !== PIPELINE_STATES.PAUSED) {
-      return { ok: false, error: 'Pipeline must be paused to unskip an agent' }
+  async unskipAgent(stepIndex, projectPath) {
+    // Can only unskip when pipeline is NOT running (idle, paused, or complete)
+    if (this.state === PIPELINE_STATES.RUNNING) {
+      return { ok: false, error: 'Pipeline must not be running to unskip an agent' }
+    }
+
+    const targetPath = projectPath || this.currentProjectPath
+
+    // If steps not loaded (pipeline never started), load from disk
+    if (this.steps.length === 0 && targetPath) {
+      try {
+        const fs = require('fs/promises')
+        const pipelineJson = JSON.parse(
+          await fs.readFile(require('path').join(targetPath, 'Pipeline', 'pipeline.json'), 'utf8')
+        )
+        this.steps = (pipelineJson.steps || []).map(step => ({
+          ...step,
+          status: STEP_STATUSES.IDLE,
+        }))
+        // Load agent snapshots
+        this.agentSnapshots.clear()
+        const AgentLibrary = require('../project/AgentLibrary')
+        for (const step of this.steps) {
+          const agent = await AgentLibrary.getById(step.agent_id)
+          if (agent) this.agentSnapshots.set(step.agent_id, agent)
+        }
+      } catch (e) {
+        return { ok: false, error: 'Failed to load pipeline configuration' }
+      }
     }
 
     // Validate step index
@@ -384,19 +488,40 @@ class PipelineRunner {
     // Update in-memory status
     step.status = STEP_STATUSES.IDLE
 
-    // Update checkpoint to mark step as idle
-    const Checkpoint = require('../checkpoint/Checkpoint')
-    await Checkpoint.updateStep(this.currentProjectPath, stepIndex, {
-      status: STEP_STATUSES.IDLE,
-      completed_at: null,
-    })
+    // Update checkpoint (create if doesn't exist)
+    let checkpoint = await Checkpoint.load(targetPath)
+    if (!checkpoint) {
+      const fs = require('fs/promises')
+      const projectJson = JSON.parse(
+        await fs.readFile(require('path').join(targetPath, 'project.json'), 'utf8')
+      )
+      await Checkpoint.save(targetPath, {
+        run_id: new Date().toISOString(),
+        pipeline: projectJson.name,
+        steps: this.steps.map(s => ({
+          agent_id: s.agent_id,
+          agent_name: this.agentSnapshots.get(s.agent_id)?.name || 'Unknown',
+          started_at: null,
+          completed_at: null,
+          status: s.status || STEP_STATUSES.IDLE,
+        })),
+        revision_loop_count: 0,
+      })
+    } else {
+      await Checkpoint.updateStep(targetPath, stepIndex, {
+        status: STEP_STATUSES.IDLE,
+        completed_at: null,
+      })
+    }
 
     // Log the unskip
     const ActivityLog = require('./ActivityLog')
-    await ActivityLog.append(this.currentProjectPath, `${agent?.name || 'Unknown'} unskipped`, 'info')
+    await ActivityLog.append(targetPath, `${agent?.name || 'Unknown'} unskipped`, 'info')
 
-    // Notify renderer
-    this._notifyStatus()
+    // Notify renderer if we have a window
+    if (this.currentWin) {
+      this._notifyStatus()
+    }
 
     return { ok: true, agentName: agent?.name || 'Unknown' }
   }

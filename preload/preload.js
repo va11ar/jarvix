@@ -26,8 +26,8 @@ contextBridge.exposeInMainWorld('api', {
   resumePipeline: () => ipcRenderer.invoke('pipeline:resume'),
   abortPipeline: () => ipcRenderer.invoke('pipeline:abort'),
   updatePipelineSteps: (steps) => ipcRenderer.invoke('pipeline:update-steps', { steps }),
-  skipAgent: (stepIndex) => ipcRenderer.invoke('pipeline:skip-agent', { stepIndex }),
-  unskipAgent: (stepIndex) => ipcRenderer.invoke('pipeline:unskip-agent', { stepIndex }),
+  skipAgent: (stepIndex, projectPath) => ipcRenderer.invoke('pipeline:skip-agent', { stepIndex, projectPath }),
+  unskipAgent: (stepIndex, projectPath) => ipcRenderer.invoke('pipeline:unskip-agent', { stepIndex, projectPath }),
   killAgent: () => ipcRenderer.invoke('agent:kill'),
 
   // Editor

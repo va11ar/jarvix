@@ -226,7 +226,7 @@ html, body {
 #main {
   display: flex;
   flex: 1;
-  overflow: hidden;
+  overflow-y: visible;
   border-bottom: 1px solid var(--border);
 }
 
@@ -238,7 +238,7 @@ html, body {
   border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .col-header {
@@ -419,10 +419,18 @@ html, body {
   background: var(--bg);
 }
 
-.pipe-btn {
+/* Wrapper for pipe-btn to enable hover on disabled buttons */
+.pipe-btn-wrap {
   display: block;
   width: 100%;
   margin-bottom: 3px;
+  position: relative;
+}
+.pipe-btn-wrap:last-child { margin-bottom: 0; }
+
+.pipe-btn {
+  display: block;
+  width: 100%;
   padding: 5px 8px;
   background: none;
   border: 1px solid var(--border);
@@ -434,11 +442,35 @@ html, body {
   cursor: pointer;
   letter-spacing: 0.04em;
   transition: background 0.1s, color 0.1s, border-color 0.1s;
+  position: relative;
 }
-.pipe-btn:last-child { margin-bottom: 0; }
-.pipe-btn:hover { background: var(--bg2); color: var(--text); border-color: var(--border2); }
 .pipe-btn:disabled { opacity: 0.3; cursor: default; }
+.pipe-btn:disabled:hover { background: none; }
 .pipe-btn::before { content: '›  '; color: var(--text-faint); }
+
+/* Tooltip for pipe-btn - shows on wrapper hover for both enabled and disabled buttons */
+/* Positioned to the right to avoid overlap with stacked buttons and sidebar borders */
+.pipe-btn-wrap::after {
+  content: attr(data-tip);
+  position: absolute;
+  left: calc(100% + 6px);
+  top: 50%;
+  transform: translateY(-50%);
+  background: var(--bg3);
+  border: 1px solid var(--border2);
+  color: var(--text);
+  font-size: 10px;
+  padding: 3px 7px;
+  border-radius: 2px;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s;
+  z-index: 1000;
+  font-family: var(--mono);
+  letter-spacing: 0.05em;
+}
+.pipe-btn-wrap:hover::after { opacity: 1; }
 
 /* ─── COL 2: CANVAS ─────────────────────────────────────── */
 #col-canvas {
