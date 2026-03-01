@@ -105,7 +105,7 @@ class PipelineRunner {
         run_id: runId,
         pipeline: projectJson.name,
         steps: checkpointSteps,
-        revision_loop_count: existingCheckpoint?.revision_loop_count || 0,
+        loop_count: existingCheckpoint?.loop_count || 0,
       })
 
       // Log pipeline start
@@ -218,10 +218,9 @@ class PipelineRunner {
       } else if (settleResult.status && settleResult.status.includes('DONE')) {
         const hasIssues = settleResult.status.includes('ISSUES: true')
         if (hasIssues) {
-          // Check if this is a revision agent
-          if (agent.revision_target) {
-            await ActivityLog.append(this.currentProjectPath, `${agent.name} — revision loop triggered`, 'warn')
-            // Handle revision loop logic here if needed
+          // Check if this is a review agent
+          if (agent.review_target) {
+            await ActivityLog.append(this.currentProjectPath, `${agent.name} — review loop triggered`, 'warn')
           }
         }
         await ActivityLog.append(this.currentProjectPath, `${agent.name} completed`, logType)
@@ -238,19 +237,39 @@ class PipelineRunner {
 
       this._notifyStatus()
 
-      // Check for revision loop
+      // Check for review loop
       if (stepStatus === STEP_STATUSES.COMPLETE && settleResult.status?.includes('ISSUES: true')) {
-        if (agent.revision_target) {
-          // Find the revision target step
-          const targetIndex = this.steps.findIndex(s => s.agent_id === agent.revision_target)
+        if (agent.review_target && agent.loop && agent.loop.type) {
+          // Find the review target step
+          const targetIndex = this.steps.findIndex(s => s.agent_id === agent.review_target)
           if (targetIndex !== -1 && targetIndex < i) {
-            const loopCount = await Checkpoint.incrementRevisionLoop(this.currentProjectPath)
-            if (loopCount < agent.max_revision_loops) {
-              // Jump back to revision target
+            const loopCount = await Checkpoint.incrementLoopCount(this.currentProjectPath)
+            const isRevision = agent.loop.type === 'revision'
+            const maxLoops = isRevision ? (agent.loop.max_revision_loops || 5) : Infinity
+
+            if (isRevision && loopCount >= maxLoops) {
+              await ActivityLog.append(this.currentProjectPath, `${agent.name} — max review loops (${maxLoops}) reached`, 'warn')
+              // Emit max-loops-reached state to renderer
+              if (this.currentWin) {
+                this.currentWin.webContents.send(IPC.PIPELINE_STATUS, {
+                  state: 'max-loops-reached',
+                  agentId: agent.id,
+                })
+              }
+            } else {
+              // Emit review-loop state to renderer
+              if (this.currentWin) {
+                this.currentWin.webContents.send(IPC.PIPELINE_STATUS, {
+                  state: 'review-loop',
+                  agentId: agent.id,
+                  loopType: agent.loop.type,
+                  loopCount,
+                  maxLoops: isRevision ? maxLoops : undefined,
+                })
+              }
+              // Jump back to review target
               i = targetIndex - 1 // Will be incremented by for loop
               continue
-            } else {
-              await ActivityLog.append(this.currentProjectPath, `${agent.name} — max revision loops (${agent.max_revision_loops}) reached`, 'warn')
             }
           }
         }
@@ -416,7 +435,7 @@ class PipelineRunner {
           completed_at: null,
           status: s.status || STEP_STATUSES.IDLE,
         })),
-        revision_loop_count: 0,
+        loop_count: 0,
       })
     } else {
       await Checkpoint.updateStep(targetPath, stepIndex, {
@@ -508,7 +527,7 @@ class PipelineRunner {
           completed_at: null,
           status: s.status || STEP_STATUSES.IDLE,
         })),
-        revision_loop_count: 0,
+        loop_count: 0,
       })
     } else {
       await Checkpoint.updateStep(targetPath, stepIndex, {

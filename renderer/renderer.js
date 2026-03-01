@@ -228,9 +228,24 @@ function wireEventListeners() {
 // ─── Pipeline Status Handler ────────────────────────────────────────────────
 
 function handlePipelineStatus(data) {
-  state.pipelineState = data.state
+  // Only update pipeline state for actual pipeline states, not transient events
+  const validPipelineStates = ['idle', 'running', 'paused', 'complete', 'error', 'aborted']
+  if (validPipelineStates.includes(data.state)) {
+    state.pipelineState = data.state
+  }
   state.pipelineSteps = data.steps || []
   state.currentStepIndex = data.currentStepIndex
+
+  // Handle review-loop state
+  if (data.state === 'review-loop' && data.loopType) {
+    updateReviewPips(data.agentId, data.loopCount, data.maxLoops, data.loopType)
+  }
+
+  // Handle max-loops-reached state
+  if (data.state === 'max-loops-reached') {
+    const agent = state.agents.find(a => a.id === data.agentId)
+    appendLogLine(`Max review loops reached for ${agent?.name || 'Unknown'}`, 'warn')
+  }
 
   updateTitlebarStatus()
   renderPipelineAgents()
@@ -687,7 +702,7 @@ async function updateDetailPanel(libraryAgent = null) {
       // Hide progress bar for library agents
       document.getElementById('progress-fill').style.width = '0%'
       document.getElementById('progress-text').textContent = 'Step 0 of 0'
-      document.getElementById('revision-section').classList.add('hidden')
+      document.getElementById('review-section').classList.add('hidden')
       return
     }
   }
@@ -743,8 +758,8 @@ async function updateDetailPanel(libraryAgent = null) {
   document.getElementById('progress-fill').style.width = `${pct}%`
   document.getElementById('progress-text').textContent = `Step ${Math.min(completed + 1, total)} of ${total}`
 
-  // Revision section (hidden by default for now)
-  document.getElementById('revision-section').classList.add('hidden')
+  // Review section (hidden by default for now)
+  document.getElementById('review-section').classList.add('hidden')
 
   // Update Skip Agent button text based on selected agent status
   updateSkipAgentButtonText()
@@ -762,6 +777,40 @@ function updateSkipAgentButtonText() {
   const selectedStep = state.pipelineSteps[state.selectedNodeIndex]
   const isSkipped = selectedStep.status === 'skipped'
   btn.textContent = isSkipped ? 'Unskip Agent' : 'Skip Agent'
+}
+
+/**
+ * Update review loop pips/spinner based on loop type
+ * @param {string} agentId - Agent ID
+ * @param {number} loopCount - Current loop iteration
+ * @param {number} maxLoops - Max loops (for revision type)
+ * @param {string} loopType - 'revision' or 'iteration'
+ */
+function updateReviewPips(agentId, loopCount, maxLoops, loopType) {
+  const section = document.getElementById('review-section')
+  const label = section.querySelector('.progress-label')
+  const pipsContainer = document.getElementById('review-pips')
+  const textEl = document.getElementById('review-text')
+
+  section.classList.remove('hidden')
+  label.textContent = 'REVIEW LOOP'
+
+  if (loopType === 'iteration') {
+    // Indeterminate mode: show spinner, no pips
+    pipsContainer.innerHTML = '<div class="pip-spinner"></div>'
+    textEl.textContent = ''
+  } else {
+    // Revision mode: show pips
+    pipsContainer.innerHTML = ''
+    for (let i = 1; i <= maxLoops; i++) {
+      const pip = document.createElement('div')
+      pip.className = 'pip'
+      if (i < loopCount) pip.classList.add('done')
+      else if (i === loopCount) pip.classList.add('active')
+      pipsContainer.appendChild(pip)
+    }
+    textEl.textContent = `${loopCount} / ${maxLoops}`
+  }
 }
 
 function updateAgentControls() {

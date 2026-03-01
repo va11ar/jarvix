@@ -32,21 +32,27 @@ class AgentProcess {
       // Write merged settings.json for this agent
       await this._writeAgentSettings()
 
+      // Ensure Output folder exists (for projects created before Output was added)
+      const outputDir = path.join(this.projectPath, 'Output')
+      await fs.mkdir(outputDir, { recursive: true })
+
       // Construct the prompt by reading all files in agent.reads
       const promptParts = [this.agent.prompt]
       for (const readFile of this.agent.reads) {
         const fullPath = path.join(this.projectPath, readFile)
         try {
           const content = await fs.readFile(fullPath, 'utf8')
-          promptParts.push(`\n\n--- Content of ${readFile} ---\n${content}`)
-        } catch {
-          // File doesn't exist — skip silently
+          promptParts.push(`\n\n@${readFile}:\n${content}`)
+        } catch (e) {
+          // File doesn't exist — log warning and skip
+          ActivityLog.append(this.projectPath, `Missing read file: ${readFile}`, 'warn')
         }
       }
 
       // Append the injected footer
       const outputFileName = path.basename(this.outputFilePath)
-      promptParts.push(`\n\nYou must write your complete output to \`${outputFileName}\`. Use your file writing tools to do this — do not print your output to the terminal.\n\nThe very last line of the file you write must be exactly one of:\n\n\`PIPELINE_STATUS: DONE | ISSUES: false\` — task complete, no issues found\n\n\`PIPELINE_STATUS: DONE | ISSUES: true\` — task complete, issues found (revision agents only)\n\n\`PIPELINE_STATUS: ERROR | REASON: <brief description>\` — task could not be completed\n\nDo not omit this line. Do not paraphrase it. Do not add anything after it.`)
+      const outputRelativePath = `../Context/${outputFileName}`
+      promptParts.push(`\n\nYou must write your complete output to \`${outputRelativePath}\`. Use your file writing tools to do this — do not print your output to the terminal.\n\nThe very last line of the file you write must be exactly one of:\n\n\`PIPELINE_STATUS: DONE | ISSUES: false\` — task complete, no issues found\n\n\`PIPELINE_STATUS: DONE | ISSUES: true\` — task complete, issues found (review agents only)\n\n\`PIPELINE_STATUS: ERROR | REASON: <brief description>\` — task could not be completed\n\nDo not omit this line. Do not paraphrase it. Do not add anything after it.`)
 
       const fullPrompt = promptParts.join('')
 
@@ -61,7 +67,7 @@ class AgentProcess {
       ]
 
       this.process = spawn('qwen', qwenArgs, {
-        cwd: this.projectPath,
+        cwd: path.join(this.projectPath, 'Output'),
         detached: true,
         stdio: ['ignore', 'pipe', 'pipe'],
       })

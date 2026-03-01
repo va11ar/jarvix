@@ -74,7 +74,7 @@ async function createInitial(projectPath, runId, pipelineName, steps) {
       completed_at: null,
       status: STEP_STATUSES.IDLE,
     })),
-    revision_loop_count: 0,
+    loop_count: 0,
   }
   await save(projectPath, checkpoint)
 }
@@ -97,17 +97,17 @@ async function updateStep(projectPath, stepIndex, updates) {
 }
 
 /**
- * Increment revision loop count
+ * Increment loop count
  * @param {string} projectPath - Project path
  * @returns {Promise<number>} - New count
  */
-async function incrementRevisionLoop(projectPath) {
+async function incrementLoopCount(projectPath) {
   const checkpoint = await load(projectPath)
   if (!checkpoint) return 0
 
-  checkpoint.revision_loop_count = (checkpoint.revision_loop_count || 0) + 1
+  checkpoint.loop_count = (checkpoint.loop_count || 0) + 1
   await save(projectPath, checkpoint)
-  return checkpoint.revision_loop_count
+  return checkpoint.loop_count
 }
 
-module.exports = { load, save, detect, createInitial, updateStep, incrementRevisionLoop }
+module.exports = { load, save, detect, createInitial, updateStep, incrementLoopCount }

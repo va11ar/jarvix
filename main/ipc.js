@@ -54,8 +54,8 @@ function registerIpcHandlers(win) {
     const definition = {
       name: 'MyAgent',
       reads: ['Context/brief.md'],
-      revision_target: null,
-      max_revision_loops: 5,
+      review_target: null,
+      loop: null,
       timeout_seconds: 300,
       allowedCommands: [],
       excludedCommands: [],

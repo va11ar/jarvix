@@ -35,8 +35,8 @@ async function parseAgentFile(filePath) {
     name: meta.name,
     filePath,
     reads: Array.isArray(meta.reads) ? meta.reads : [],
-    revision_target: meta.revision_target || null,
-    max_revision_loops: meta.max_revision_loops || 5,
+    review_target: meta.review_target || null,
+    loop: meta.loop || null,
     timeout_seconds: meta.timeout_seconds || 300,
     allowedCommands: Array.isArray(meta.allowedCommands) ? meta.allowedCommands : [],
     excludedCommands: Array.isArray(meta.excludedCommands) ? meta.excludedCommands : [],
@@ -49,7 +49,7 @@ async function parseAgentFile(filePath) {
  * @param {Object} definition - Agent definition
  * @returns {Promise<{id: string, filePath: string}>}
  */
-async function create({ name, reads, revision_target, max_revision_loops, timeout_seconds, allowedCommands, excludedCommands, prompt }) {
+async function create({ name, reads, review_target, loop, timeout_seconds, allowedCommands, excludedCommands, prompt }) {
   const AGENTS_DIR = await getAgentsDir()
   const id = crypto.randomUUID()
   const safeName = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
@@ -59,8 +59,8 @@ async function create({ name, reads, revision_target, max_revision_loops, timeou
     id,
     name,
     reads: reads || [],
-    revision_target: revision_target || null,
-    max_revision_loops: max_revision_loops || 5,
+    review_target: review_target || null,
+    loop: loop || null,
     timeout_seconds: timeout_seconds || 300,
     allowedCommands: allowedCommands || [],
     excludedCommands: excludedCommands || [],
@@ -77,31 +77,31 @@ async function create({ name, reads, revision_target, max_revision_loops, timeou
  * @param {Object} definition - Agent definition
  * @returns {Promise<{id: string, filePath: string, error?: string}>}
  */
-async function createBoilerplate({ name, reads, revision_target, max_revision_loops, timeout_seconds, allowedCommands, excludedCommands, prompt }) {
+async function createBoilerplate({ name, reads, review_target, loop, timeout_seconds, allowedCommands, excludedCommands, prompt }) {
   const AGENTS_DIR = await getAgentsDir()
   const id = crypto.randomUUID()
   const safeName = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
-  
+
   // Check for existing files and generate unique name
   await fs.mkdir(AGENTS_DIR, { recursive: true })
   const existingFiles = (await fs.readdir(AGENTS_DIR)).filter(f => f.endsWith('.md'))
   const existingNames = new Set(existingFiles.map(f => f.replace(/\.md$/, '')))
-  
+
   let uniqueName = safeName
   let counter = 1
   while (existingNames.has(uniqueName)) {
     uniqueName = `${safeName}-${counter}`
     counter++
   }
-  
+
   const filePath = path.join(AGENTS_DIR, `${uniqueName}.md`)
 
   const frontMatter = yaml.dump({
     id,
     name: name + (counter > 1 ? ` (${counter})` : ''),
     reads: reads || [],
-    revision_target: revision_target || null,
-    max_revision_loops: max_revision_loops || 5,
+    review_target: review_target || null,
+    loop: loop || null,
     timeout_seconds: timeout_seconds || 300,
     allowedCommands: allowedCommands || [],
     excludedCommands: excludedCommands || [],
@@ -116,11 +116,12 @@ async function createBoilerplate({ name, reads, revision_target, max_revision_lo
 # reads: List of Context/ files this agent reads as input.
 #   Example: [architect.md, programmer.md]
 #
-# revision_target: Agent name this agent can send work back to (for review loops).
-#   Set to null if this agent does not trigger revisions.
+# review_target: UUID of the agent this agent reviews (for review loops).
+#   Set to null if this agent does not trigger review loops.
 #
-# max_revision_loops: Maximum times the revision cycle can repeat before Jarvix
-#   forces the pipeline to advance. Default: 5
+# loop: Configuration for review loop behavior. Only used if review_target is set.
+#   type: "revision" (bounded loop with max_revision_loops) or "iteration" (unbounded)
+#   max_revision_loops: Required only if type is "revision". Default: 5
 #
 # timeout_seconds: Time limit before Jarvix kills the agent and surfaces an error.
 #   Default: 300

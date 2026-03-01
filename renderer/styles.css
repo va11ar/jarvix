@@ -690,7 +690,7 @@ html, body {
   margin-top: 3px;
 }
 
-.revision-section {
+.review-section {
   padding: 7px 12px;
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
@@ -711,6 +711,20 @@ html, body {
 .pip.done { background: var(--green-dim); border-color: var(--green); }
 .pip.active { background: var(--amber-dim); border-color: var(--amber); animation: pulse 1.4s ease-in-out infinite; }
 .pip.fail { background: var(--red-dim); border-color: var(--red); }
+
+/* Indeterminate spinner for iteration loop type */
+.pip-spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--bg3);
+  border-top-color: var(--amber);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
 
 #agent-output {
   flex: 1;

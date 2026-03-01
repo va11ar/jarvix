@@ -33,6 +33,7 @@ async function create({ name, folderPath, steps, allowedCommands, brief }) {
   await fs.mkdir(path.join(projectPath, 'Context'), { recursive: true })
   await fs.mkdir(path.join(projectPath, 'Pipeline'), { recursive: true })
   await fs.mkdir(path.join(projectPath, '.qwen'), { recursive: true })
+  await fs.mkdir(path.join(projectPath, 'Output'), { recursive: true })
 
   // project.json — identity only
   const projectJson = { name, created: new Date().toISOString() }
@@ -99,6 +100,9 @@ async function open(folderPath) {
     const pipelineJson = JSON.parse(
       await fs.readFile(path.join(folderPath, 'Pipeline', 'pipeline.json'), 'utf8')
     )
+
+    // Ensure Output folder exists (for projects created before Output was added)
+    await fs.mkdir(path.join(folderPath, 'Output'), { recursive: true })
 
     // Crash recovery: if settings.json differs from baseline.json, restore from baseline
     try {
