@@ -108,36 +108,54 @@ async function createBoilerplate({ name, reads, revision_target, max_revision_lo
   }).trim()
 
   // Boilerplate content with helpful comments
-  const boilerplateContent = `# This is a boilerplate agent file created by JARVIX
-# Replace the values below with your own configuration.
-# Do not edit the 'id' field — it is used to track this agent across projects.
+  const boilerplateContent = `# JARVIX Agent Definition
+# ========================
+# id: DO NOT EDIT — used by Jarvix to track this agent across projects.
+# name: Human-readable label shown in the pipeline UI.
+#
+# reads: List of Context/ files this agent reads as input.
+#   Example: [architect.md, programmer.md]
+#
+# revision_target: Agent name this agent can send work back to (for review loops).
+#   Set to null if this agent does not trigger revisions.
+#
+# max_revision_loops: Maximum times the revision cycle can repeat before Jarvix
+#   forces the pipeline to advance. Default: 5
+#
+# timeout_seconds: Time limit before Jarvix kills the agent and surfaces an error.
+#   Default: 300
+#
+# allowedCommands: Shell commands this agent is permitted to run.
+# excludedCommands: Shell commands this agent is explicitly blocked from running.
 
 ---
 # DO NOT EDIT — app identifier
 ${frontMatter}
 ---
 
-# Agent Prompt Instructions
-# -------------------------
-# Write your agent's prompt below. This is the instructions that will be
-# given to the AI coding agent when it runs.
+# Agent Prompt
+# ============
+# Write your agent's instructions below.
 #
-# The agent will:
-# 1. Read the files listed in 'reads' from the Context/ folder
-# 2. Execute the task described in your prompt
-# 3. Write its output to Context/<agentname>.md
+# WHAT TO INCLUDE — only what the agent cannot infer from reading the codebase:
+#   - Its specific role and what it is responsible for outputting
+#   - Non-obvious constraints or ordering requirements
+#   - What it must NOT do
 #
-# The last line of the output file must be:
-# PIPELINE_STATUS: DONE | ISSUES: false
-# or
-# PIPELINE_STATUS: DONE | ISSUES: true
-# or
-# PIPELINE_STATUS: ERROR | REASON: <description>
+# WHAT TO OMIT — these increase cost and reduce agent performance (ICSE 2026):
+#   - Architecture overviews or explanations of the codebase
+#   - Descriptions of what good output looks like
+#   - Anything the agent can discover by reading files itself
 #
-# Example prompt:
-# "Read the project brief and architecture document. Implement the described
-# system and write a summary to Context/programmer.md."
-
+# OUTPUT: The agent must write its output to Context/<agentname>.md
+#
+# Jarvix automatically appends the required PIPELINE_STATUS signal to your prompt
+# at runtime — you do not need to include it. For reference, the agent must write
+# one of the following as the last line of its output file:
+#
+#   PIPELINE_STATUS: DONE | ISSUES: false
+#   PIPELINE_STATUS: DONE | ISSUES: true
+#   PIPELINE_STATUS: ERROR | REASON: <description>
 `
 
   try {

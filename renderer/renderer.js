@@ -112,7 +112,6 @@ function wireEventListeners() {
   // Agent controls
   document.getElementById('btn-continue').addEventListener('click', handleContinue)
   document.getElementById('btn-edit-output').addEventListener('click', handleEditOutput)
-  document.getElementById('btn-interrupt').addEventListener('click', handleInterrupt)
   document.getElementById('btn-kill-agent').addEventListener('click', handleKillAgent)
 
   // Activity log
@@ -616,6 +615,7 @@ function selectAgent(index) {
   })
 
   updateDetailPanel()
+  updateAgentControls()
   setPipelineControlsDisabled(state.pipelineSteps.length === 0)
 }
 
@@ -640,6 +640,7 @@ function deselectAgent() {
   })
 
   updateDetailPanel()
+  updateAgentControls()
   setPipelineControlsDisabled(state.pipelineSteps.length === 0)
 }
 
@@ -756,18 +757,16 @@ function updateSkipAgentButtonText() {
 
 function updateAgentControls() {
   const continueBtn = document.getElementById('btn-continue')
-  const interruptBtn = document.getElementById('btn-interrupt')
   const killBtn = document.getElementById('btn-kill-agent')
   const editOutputBtn = document.getElementById('btn-edit-output')
 
   // Continue only when paused at transition
   continueBtn.classList.toggle('hidden', state.pipelineState !== 'paused')
 
-  // Interrupt only when running
-  interruptBtn.disabled = state.pipelineState !== 'running'
-
-  // Kill only when agent is running
-  killBtn.classList.toggle('hidden', state.pipelineState !== 'running' || state.currentStepIndex === -1)
+  // Kill button visible only when pipeline is running AND an agent is selected
+  const isRunning = state.pipelineState === 'running'
+  const hasSelection = state.selectedNodeIndex !== -1
+  killBtn.classList.toggle('hidden', !isRunning || !hasSelection)
 
   // Edit output always enabled if there's output
   editOutputBtn.disabled = !state.agentOutputs.get(state.pipelineSteps[state.selectedNodeIndex]?.agent_id)
@@ -833,14 +832,6 @@ async function handleContinue() {
     await window.api.resumePipeline()
   } catch (e) {
     appendLogLine('Failed to continue: ' + e.message, 'error')
-  }
-}
-
-async function handleInterrupt() {
-  try {
-    await window.api.pausePipeline()
-  } catch (e) {
-    appendLogLine('Failed to interrupt: ' + e.message, 'error')
   }
 }
 
@@ -949,6 +940,7 @@ async function loadProject(projectPath) {
     renderLibraryAgents()
     renderPipelineCanvas()
     updateDetailPanel()
+    updateAgentControls()
     updateTitlebarStatus()
     updateStatusBar()
 

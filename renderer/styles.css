@@ -447,6 +447,9 @@ html, body {
 .pipe-btn:disabled { opacity: 0.3; cursor: default; }
 .pipe-btn:disabled:hover { background: none; }
 .pipe-btn::before { content: '›  '; color: var(--text-faint); }
+.pipe-btn.danger { border-color: var(--red-dim); color: var(--red); }
+.pipe-btn.danger:hover { background: var(--red-dim); color: var(--red); border-color: var(--red); }
+.pipe-btn.danger::before { content: '›  '; color: var(--red-dim); }
 
 /* Tooltip for pipe-btn - shows on wrapper hover for both enabled and disabled buttons */
 /* Positioned to the right to avoid overlap with stacked buttons and sidebar borders */
