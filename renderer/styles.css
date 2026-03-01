@@ -755,6 +755,8 @@ html, body {
 }
 .agent-btn:last-child { margin-bottom: 0; }
 .agent-btn:hover { background: var(--bg2); color: var(--text); border-color: var(--border2); }
+.agent-btn:disabled { opacity: 0.3; cursor: default; pointer-events: none; }
+.agent-btn:disabled:hover { background: none; color: var(--text-dim); border-color: var(--border); }
 .agent-btn.primary { border-color: var(--accent-dim); color: var(--accent); }
 .agent-btn.primary:hover { background: var(--accent-dim); border-color: var(--accent); }
 .agent-btn.danger { border-color: var(--red-dim); color: var(--red-dim); }

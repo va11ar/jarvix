@@ -56,6 +56,7 @@ const IPC = {
   CONTEXT_LIST: 'context:list',
   CONTEXT_WRITE: 'context:write',
   CONTEXT_AGENT_OUTPUT_PATH: 'context:agent-output-path',
+  CONTEXT_OPEN_OUTPUT: 'context:open-output',
 
   // Settings
   SETTINGS_GET: 'settings:get',

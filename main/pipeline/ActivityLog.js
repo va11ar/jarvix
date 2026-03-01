@@ -1,13 +1,40 @@
 const fs = require('fs/promises')
+const fsSync = require('fs')
 const path = require('path')
+const CONSTANTS = require('../constants')
+
+const MAX_LOG_SIZE = 5 * 1024 * 1024 // 5 MB
+
+// Reference to BrowserWindow for IPC notifications (set by PipelineRunner)
+let currentWindow = null
+
+// Track which projects have had a session marker added in this session
+const sessionMarkersAdded = new Set()
 
 /**
- * Get the monitor.md file path for a project
+ * Set the window reference for IPC notifications
+ * @param {import('electron').BrowserWindow} win
+ */
+function setWindow(win) {
+  currentWindow = win
+}
+
+/**
+ * Get the logs folder path for a project
  * @param {string} projectPath - Project path
  * @returns {string}
  */
-function getMonitorPath(projectPath) {
-  return path.join(projectPath, 'Context', 'monitor.md')
+function getLogsFolder(projectPath) {
+  return path.join(projectPath, 'logs')
+}
+
+/**
+ * Get the log.md file path for a project
+ * @param {string} projectPath - Project path
+ * @returns {string}
+ */
+function getLogPath(projectPath) {
+  return path.join(getLogsFolder(projectPath), 'log.md')
 }
 
 /**
@@ -23,29 +50,116 @@ function formatTimestamp(date = new Date()) {
 }
 
 /**
- * Append a log entry to monitor.md
- * @param {string} projectPath - Project path
- * @param {string} message - Log message
- * @param {'start'|'info'|'ok'|'warn'|'error'} type - Log type (determines CSS class)
- * @returns {Promise<void>}
+ * Get current Unix timestamp
+ * @returns {number}
  */
-async function append(projectPath, message, type = 'info') {
-  const monitorPath = getMonitorPath(projectPath)
-  const timestamp = formatTimestamp()
-  const entry = `[${timestamp}] ${message}\n`
-
-  await fs.mkdir(path.dirname(monitorPath), { recursive: true })
-  await fs.appendFile(monitorPath, entry, 'utf8')
+function getUnixTimestamp() {
+  return Math.floor(Date.now() / 1000)
 }
 
 /**
- * Read the full monitor.md content
+ * Check if log file exists and get its size
+ * @param {string} logPath - Path to log file
+ * @returns {Promise<number>} File size in bytes, or 0 if doesn't exist
+ */
+async function getLogFileSize(logPath) {
+  try {
+    const stats = await fs.stat(logPath)
+    return stats.size
+  } catch {
+    return 0
+  }
+}
+
+/**
+ * Rotate log file if it exceeds max size
+ * @param {string} projectPath - Project path
+ * @returns {Promise<void>}
+ */
+async function rotateLogIfNeeded(projectPath) {
+  const logPath = getLogPath(projectPath)
+  const size = await getLogFileSize(logPath)
+
+  if (size >= MAX_LOG_SIZE) {
+    const timestamp = getUnixTimestamp()
+    const archivedPath = path.join(getLogsFolder(projectPath), `log_${timestamp}.md`)
+    await fs.rename(logPath, archivedPath)
+  }
+}
+
+/**
+ * Check if log file already has content from a previous session
+ * and we haven't added a session marker for this session yet
+ * @param {string} logPath - Path to log file
+ * @param {string} projectPath - Project path (for tracking)
+ * @returns {Promise<boolean>} True if session marker should be added
+ */
+async function checkSessionMarkerNeeded(logPath, projectPath) {
+  // If we already added a session marker for this project, don't add another
+  if (sessionMarkersAdded.has(projectPath)) {
+    return false
+  }
+  
+  // Check if file has content (from a previous session)
+  try {
+    const content = await fs.readFile(logPath, 'utf8')
+    return content.trim().length > 0
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Append a log entry to log.md
+ * @param {string} projectPath - Project path
+ * @param {string} message - Log message
+ * @param {'start'|'info'|'ok'|'warn'|'error'} type - Log type (determines CSS class)
+ * @returns {Promise<{ time: string, message: string, type: string }>}
+ */
+async function append(projectPath, message, type = 'info') {
+  const logPath = getLogPath(projectPath)
+  const logsFolder = getLogsFolder(projectPath)
+
+  // Ensure logs folder exists
+  await fs.mkdir(logsFolder, { recursive: true })
+
+  // Check if rotation is needed before writing
+  await rotateLogIfNeeded(projectPath)
+
+  const timestamp = formatTimestamp()
+  const entry = `[${timestamp}] ${message}\n`
+
+  // Check if we need to add a session marker (only once per session)
+  const needsMarker = await checkSessionMarkerNeeded(logPath, projectPath)
+  if (needsMarker) {
+    const sessionMarker = `[New session -- ${getUnixTimestamp()}]\n\n`
+    await fs.appendFile(logPath, sessionMarker, 'utf8')
+    sessionMarkersAdded.add(projectPath)
+  }
+
+  // Write the log entry
+  await fs.appendFile(logPath, entry, 'utf8')
+
+  // Notify renderer if window is set
+  if (currentWindow) {
+    currentWindow.webContents.send(CONSTANTS.IPC.LOG_UPDATED, {
+      time: timestamp,
+      message,
+      type,
+    })
+  }
+
+  return { time: timestamp, message, type }
+}
+
+/**
+ * Read the full log.md content
  * @param {string} projectPath - Project path
  * @returns {Promise<string>}
  */
 async function read(projectPath) {
   try {
-    return await fs.readFile(getMonitorPath(projectPath), 'utf8')
+    return await fs.readFile(getLogPath(projectPath), 'utf8')
   } catch {
     return ''
   }
@@ -62,4 +176,4 @@ const LOG_TYPES = {
   ERROR: 'error',
 }
 
-module.exports = { append, read, LOG_TYPES }
+module.exports = { append, read, setWindow, LOG_TYPES }

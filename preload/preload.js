@@ -42,6 +42,8 @@ contextBridge.exposeInMainWorld('api', {
   writeContextFile: (filePath, content) => ipcRenderer.invoke('context:write', { filePath, content }),
   getAgentOutputPath: (projectPath, agentFilePath) =>
     ipcRenderer.invoke('context:agent-output-path', { projectPath, agentFilePath }),
+  openAgentOutput: (projectPath, agentFilePath) =>
+    ipcRenderer.invoke('context:open-output', { projectPath, agentFilePath }),
 
   // Settings
   getSettings: () => ipcRenderer.invoke('settings:get'),

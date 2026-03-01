@@ -37,6 +37,9 @@ class PipelineRunner {
       this.currentWin = win
       this.state = PIPELINE_STATES.RUNNING
 
+      // Set window reference for ActivityLog IPC notifications
+      ActivityLog.setWindow(win)
+
       // Load pipeline configuration
       const pipelineJson = await require('fs/promises').readFile(
         path.join(projectPath, 'Pipeline', 'pipeline.json'),

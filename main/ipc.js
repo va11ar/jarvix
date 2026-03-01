@@ -1,5 +1,6 @@
 const { ipcMain, dialog, shell } = require('electron')
 const fs = require('fs/promises')
+const fsSync = require('fs')
 const path = require('path')
 const ProjectManager = require('./project/ProjectManager')
 const AgentLibrary = require('./project/AgentLibrary')
@@ -94,6 +95,15 @@ function registerIpcHandlers(win) {
   ipcMain.handle('context:agent-output-path', h(({ projectPath, agentFilePath }) => {
     const outputFileName = path.basename(agentFilePath, '.md') + '.md'
     return path.join(projectPath, 'Context', outputFileName)
+  }))
+  ipcMain.handle('context:open-output', h(async ({ projectPath, agentFilePath }) => {
+    const outputFileName = path.basename(agentFilePath, '.md') + '.md'
+    const outputPath = path.join(projectPath, 'Context', outputFileName)
+    if (!fsSync.existsSync(outputPath)) {
+      return { exists: false }
+    }
+    await shell.openPath(outputPath)
+    return { exists: true, ok: true }
   }))
 
   // ── Settings ─────────────────────────────────────────────────────────────

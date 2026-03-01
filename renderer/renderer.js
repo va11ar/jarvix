@@ -83,6 +83,10 @@ function setupIPCListeners() {
     handlePipelineStatus(data)
   })
 
+  window.api.onLogUpdated((data) => {
+    appendLogLine(data.message, data.type, data.time)
+  })
+
   window.api.onAgentDefinitionChanged((data) => {
     handleAgentDefinitionChanged(data)
   })
@@ -718,12 +722,17 @@ async function updateDetailPanel(libraryAgent = null) {
     try {
       const outputPath = await window.api.getAgentOutputPath(state.currentProject.projectPath, agent.filePath)
       const content = await window.api.readContextFile(outputPath)
-      state.agentOutputs.set(step.agent_id, content)
+      // Store true if file exists (even if empty), false if file doesn't exist
+      state.agentOutputs.set(step.agent_id, content !== undefined && content !== null)
       document.getElementById('agent-output').textContent = content || '(No output yet)'
       document.getElementById('detail-output').textContent = content ? `${(content.length / 1024).toFixed(1)} KB` : '—'
-    } catch {
+      updateAgentControls()
+    } catch (e) {
+      // File doesn't exist
+      state.agentOutputs.set(step.agent_id, false)
       document.getElementById('agent-output').textContent = '(File not found)'
       document.getElementById('detail-output').textContent = '—'
+      updateAgentControls()
     }
   }
 
@@ -768,8 +777,21 @@ function updateAgentControls() {
   const hasSelection = state.selectedNodeIndex !== -1
   killBtn.classList.toggle('hidden', !isRunning || !hasSelection)
 
-  // Edit output always enabled if there's output
-  editOutputBtn.disabled = !state.agentOutputs.get(state.pipelineSteps[state.selectedNodeIndex]?.agent_id)
+  // Edit output: hidden when no agent selected, disabled when pipeline running
+  const selectedAgentId = state.pipelineSteps[state.selectedNodeIndex]?.agent_id
+  const hasOutput = state.agentOutputs.get(selectedAgentId)
+  if (!hasSelection) {
+    // No agent selected: hide the button
+    editOutputBtn.classList.add('hidden')
+  } else if (isRunning) {
+    // Agent selected but pipeline running: show but disable
+    editOutputBtn.classList.remove('hidden')
+    editOutputBtn.disabled = true
+  } else {
+    // Agent selected and pipeline not running: show and enable if there's output
+    editOutputBtn.classList.remove('hidden')
+    editOutputBtn.disabled = !hasOutput
+  }
 }
 
 // ─── Pipeline Control Actions ───────────────────────────────────────────────
@@ -843,16 +865,38 @@ async function handleKillAgent() {
   }
 }
 
-function handleEditOutput() {
-  appendLogLine('Edit Output not implemented', 'warn')
+async function handleEditOutput() {
+  try {
+    if (!state.currentProject || state.selectedNodeIndex === -1) {
+      appendLogLine('No agent selected', 'warn')
+      return
+    }
+
+    const step = state.pipelineSteps[state.selectedNodeIndex]
+    const agent = state.agents.find(a => a.id === step.agent_id)
+
+    if (!agent || !agent.filePath) {
+      appendLogLine('Selected agent does not have an output file. This is likely because the agent did not output anything or did not complete a run yet.', 'warn')
+      return
+    }
+
+    const result = await window.api.openAgentOutput(state.currentProject.projectPath, agent.filePath)
+    if (result.exists === false) {
+      appendLogLine('Selected agent does not have an output file. This is likely because the agent did not output anything or did not complete a run yet.', 'warn')
+    }
+  } catch (e) {
+    appendLogLine('Failed to open output file: ' + e.message, 'error')
+  }
 }
 
 // ─── Activity Log ───────────────────────────────────────────────────────────
 
-function appendLogLine(message, type = 'info') {
+function appendLogLine(message, type = 'info', time = null) {
   const logLines = document.getElementById('log-lines')
-  const now = new Date()
-  const time = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`
+  if (!time) {
+    const now = new Date()
+    time = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`
+  }
 
   const line = document.createElement('div')
   line.className = `log-line ${type}`
