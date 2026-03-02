@@ -205,6 +205,31 @@ html, body {
 .wc-btn:hover { background: var(--bg3); color: var(--text); }
 .wc-btn.close:hover { background: var(--red); color: #fff; }
 
+/* ─── BRIEFBAR ──────────────────────────────────────────── */
+#briefbar {
+  height: 30px;
+  min-height: 30px;
+  background: var(--bg1);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  padding: 0 14px;
+  -webkit-app-region: drag;
+  user-select: none;
+  flex-shrink: 0;
+}
+
+#brief-text {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-dim);
+  font-style: italic;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  -webkit-app-region: no-drag;
+}
+
 /* ─── MAIN AREA ─────────────────────────────────────────── */
 #main {
   display: flex;
@@ -1206,6 +1231,26 @@ html, body {
   flex-direction: column;
   gap: 4px;
   margin-bottom: 10px;
+}
+.agent-load-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  background: var(--red-dim);
+  border: 1px solid var(--red);
+  border-radius: 3px;
+  margin-bottom: 12px;
+}
+.agent-load-warning .warning-icon {
+  font-size: 14px;
+  line-height: 1.4;
+  flex-shrink: 0;
+}
+.agent-load-warning .warning-text {
+  font-size: 10px;
+  color: var(--text);
+  line-height: 1.5;
 }
 .agent-pick-item {
   display: flex;

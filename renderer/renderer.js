@@ -12,6 +12,9 @@ const state = {
   agents: [],
   projects: [],
 
+  // Agent load errors (permission issues, etc.)
+  agentLoadErrors: [],
+
   // Pipeline state
   pipelineSteps: [],
   currentStepIndex: -1,
@@ -62,12 +65,13 @@ document.addEventListener('DOMContentLoaded', async () => {
 
 async function loadInitialData() {
   try {
-    const [agents, projects, firstLaunchResult] = await Promise.all([
+    const [agentResult, projects, firstLaunchResult] = await Promise.all([
       window.api.listAgents(),
       window.api.listProjects(),
       window.api.checkFirstLaunch(),
     ])
-    state.agents = agents || []
+    state.agents = agentResult?.agents || []
+    state.agentLoadErrors = agentResult?.errors || []
     state.projects = projects || []
     updateStatusBar()
 
@@ -164,7 +168,8 @@ function wireEventListeners() {
       }
       appendLogLine('Agent created and opened in editor', 'ok')
       // Reload agents list
-      state.agents = await window.api.listAgents()
+      const result2 = await window.api.listAgents()
+      state.agents = result2?.agents || []
       renderLibraryAgents()
     } catch (e) {
       appendLogLine('Failed to create agent: ' + e.message, 'error')
@@ -174,7 +179,8 @@ function wireEventListeners() {
   // Refresh agents button
   document.getElementById('btn-refresh-agents').addEventListener('click', async () => {
     try {
-      state.agents = await window.api.listAgents()
+      const result = await window.api.listAgents()
+      state.agents = result?.agents || []
       renderLibraryAgents()
       appendLogLine('Agents list refreshed', 'info')
     } catch (e) {
@@ -588,7 +594,8 @@ async function handleAgentDefinitionChanged(data) {
   const { agentId } = data
   // Reload agents list
   try {
-    state.agents = await window.api.listAgents()
+    const result = await window.api.listAgents()
+    state.agents = result?.agents || []
     renderLibraryAgents()
 
     // Show edit warning dialog
@@ -1326,7 +1333,9 @@ async function openProjectDialog() {
 async function loadProject(projectPath) {
   try {
     // Refresh agents list first to ensure we have latest data
-    state.agents = await window.api.listAgents() || []
+    const agentResult = await window.api.listAgents()
+    state.agents = agentResult?.agents || []
+    state.agentLoadErrors = agentResult?.errors || []
 
     const result = await window.api.openProject(projectPath)
     if (result.error) {
@@ -1400,14 +1409,15 @@ async function openNewProjectDialog() {
   document.getElementById('new-project-footer-status').textContent = ''
 
   // Pre-load stack defaults and agent list
-  let stackDefaults, agents
+  let stackDefaults, agentResult
   try {
-    [stackDefaults, agents] = await Promise.all([
+    [stackDefaults, agentResult] = await Promise.all([
       window.api.getStackDefaults(),
       window.api.listAgents(),
     ])
-    state.agents = agents || []
-    state.npTotalAgents = agents ? agents.length : 0
+    state.agents = agentResult?.agents || []
+    state.agentLoadErrors = agentResult?.errors || []
+    state.npTotalAgents = agentResult?.agents ? agentResult.agents.length : 0
   } catch (e) {
     appendLogLine('Failed to load dialog data: ' + e.message, 'error')
     return
@@ -1415,7 +1425,7 @@ async function openNewProjectDialog() {
 
   npRenderStackPicker(stackDefaults)
   npRenderDeniedList(stackDefaults.hardcodedExclude)
-  npRenderAgentPicker(agents)
+  npRenderAgentPicker(state.agents, state.agentLoadErrors)
 
   showDialog('dialog-new-project')
   npUpdateUI()
@@ -1603,9 +1613,21 @@ function npRenderDeniedList(hardcodedExclude) {
   }
 }
 
-function npRenderAgentPicker(agents) {
+function npRenderAgentPicker(agents, errors = []) {
   const list = document.getElementById('agent-picker-list')
   list.innerHTML = ''
+
+  // Show warning if there are permission errors
+  if (errors && errors.length > 0) {
+    const warningDiv = document.createElement('div')
+    warningDiv.className = 'agent-load-warning'
+    warningDiv.innerHTML = `
+      <div class="warning-icon">⚠</div>
+      <div class="warning-text">Could not display some agent files due to permission issues, Jarvix lacks the correct permissions to access them</div>
+    `
+    list.appendChild(warningDiv)
+  }
+
   for (const agent of agents) {
     const item = document.createElement('div')
     item.className = 'agent-pick-item'
@@ -1757,9 +1779,26 @@ async function openAddAgentDialog() {
 
   try {
     // Load agents from library
-    const agents = await window.api.listAgents()
+    const result = await window.api.listAgents()
+    const agents = result?.agents || []
+    const errors = result?.errors || []
+
+    // Store errors in state for potential display
+    state.agentLoadErrors = errors
+
     const list = document.getElementById('add-agent-list')
     list.innerHTML = ''
+
+    // Show warning if there are permission errors
+    if (errors && errors.length > 0) {
+      const warningDiv = document.createElement('div')
+      warningDiv.className = 'agent-load-warning'
+      warningDiv.innerHTML = `
+        <div class="warning-icon">⚠</div>
+        <div class="warning-text">Could not display some agent files due to permission issues, Jarvix lacks the correct permissions to access them</div>
+      `
+      list.appendChild(warningDiv)
+    }
 
     if (!agents || agents.length === 0) {
       list.innerHTML = '<div class="pipeline-agents-empty"><div class="pipeline-agents-empty-text">No agents available. Create an agent first.</div></div>'
@@ -1802,7 +1841,8 @@ async function addAgentToPipeline(agent) {
     appendLogLine(`Added "${agent.name}" to pipeline`, 'ok')
 
     // Refresh agents list from library
-    state.agents = await window.api.listAgents()
+    const result = await window.api.listAgents()
+    state.agents = result?.agents || []
 
     // Re-render UI
     renderPipelineAgents()
@@ -1833,7 +1873,8 @@ async function handleRemoveAgent() {
     appendLogLine(`Removed "${agentName}" from pipeline`, 'ok')
 
     // Refresh agents list from library
-    state.agents = await window.api.listAgents()
+    const result = await window.api.listAgents()
+    state.agents = result?.agents || []
 
     // Clear selection
     state.selectedNodeIndex = -1
@@ -2061,7 +2102,8 @@ function wireNewProjectDialog() {
       }
       appendLogLine('Agent created and opened in editor', 'ok')
       // Reload agents list and re-render picker
-      state.agents = await window.api.listAgents()
+      const agentResult = await window.api.listAgents()
+      state.agents = agentResult?.agents || []
       state.npTotalAgents = state.agents.length
       // Re-render the agent picker with updated list
       npRenderAgentPicker(state.agents)

@@ -4,6 +4,18 @@ const yaml = require('js-yaml')
 const crypto = require('crypto')
 const { app } = require('electron')
 
+// UUID regex pattern for validation
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/**
+ * Check if a string is a valid UUID format
+ * @param {string} str - String to validate
+ * @returns {boolean}
+ */
+function isValidUuid(str) {
+  return typeof str === 'string' && UUID_REGEX.test(str)
+}
+
 // AGENTS_DIR is resolved at call time — not at module load — so that the overridable
 // agentsDir setting in settings.json is always respected.
 async function getAgentsDir() {
@@ -27,8 +39,13 @@ async function parseAgentFile(filePath) {
   const meta = yaml.load(fmMatch[1])
   const prompt = fmMatch[2].trim()
 
-  if (!meta.id) throw new Error(`Agent file missing 'id' field: ${filePath}`)
   if (!meta.name) throw new Error(`Agent file missing 'name' field: ${filePath}`)
+
+  // If agent is missing UUID or has a placeholder/invalid UUID, assign a real one
+  if (!meta.id || !isValidUuid(meta.id)) {
+    await assignUuidIfMissing(filePath, raw, fmMatch, meta, prompt)
+    meta.id = await readAssignedUuid(filePath)
+  }
 
   return {
     id: meta.id,
@@ -44,6 +61,51 @@ async function parseAgentFile(filePath) {
     role: meta.role === 'programmer' ? 'programmer' : null,
     prompt,
   }
+}
+
+/**
+ * Assign a UUID to an agent file that is missing one
+ * @param {string} filePath - Path to agent file
+ * @param {string} raw - Original file content
+ * @param {RegExpMatchArray} fmMatch - Front matter regex match
+ * @param {Object} meta - Parsed YAML metadata
+ * @param {string} prompt - Prompt body
+ */
+async function assignUuidIfMissing(filePath, raw, fmMatch, meta, prompt) {
+  const id = crypto.randomUUID()
+  meta.id = id
+
+  // Rebuild front matter with the new ID
+  const frontMatter = yaml.dump({
+    id,
+    name: meta.name,
+    reads: meta.reads || [],
+    review_target: meta.review_target || null,
+    loop: meta.loop || null,
+    timeout_seconds: meta.timeout_seconds || 300,
+    allowedCommands: meta.allowedCommands || [],
+    excludedCommands: meta.excludedCommands || [],
+  }).trim()
+
+  // Preserve the original comment if present, otherwise add the standard comment
+  const hasComment = fmMatch[1].includes('# DO NOT EDIT')
+  const comment = hasComment ? '' : '# DO NOT EDIT — app identifier\n'
+  const content = `---\n${comment}${frontMatter}\n---\n\n${prompt}`
+  
+  await fs.writeFile(filePath, content, 'utf8')
+}
+
+/**
+ * Read the assigned UUID from an agent file after it has been written
+ * @param {string} filePath - Path to agent file
+ * @returns {Promise<string>}
+ */
+async function readAssignedUuid(filePath) {
+  const raw = await fs.readFile(filePath, 'utf8')
+  const fmMatch = raw.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n([\s\S]*)$/m)
+  if (!fmMatch) throw new Error(`Agent file missing YAML front matter: ${filePath}`)
+  const meta = yaml.load(fmMatch[1])
+  return meta.id
 }
 
 /**
@@ -171,22 +233,72 @@ ${frontMatter}
 
 /**
  * List all agents
- * @returns {Promise<Array>}
+ * @returns {Promise<{agents: Array, errors: Array}>}
  */
 async function list() {
   const AGENTS_DIR = await getAgentsDir()
   await fs.mkdir(AGENTS_DIR, { recursive: true })
   const files = (await fs.readdir(AGENTS_DIR)).filter(f => f.endsWith('.md'))
   const agents = []
+  const errors = []
+  const idMap = new Map() // Track UUIDs to detect duplicates
+
   for (const file of files) {
     try {
       const agent = await parseAgentFile(path.join(AGENTS_DIR, file))
+
+      // Check for duplicate UUIDs and fix them
+      if (idMap.has(agent.id)) {
+        // Duplicate UUID found — assign a new one to this agent
+        const newId = crypto.randomUUID()
+        await reassignUuid(agent.filePath, newId)
+        agent.id = newId
+        console.log(`Reassigned duplicate UUID for ${file}: ${newId}`)
+      }
+      idMap.set(agent.id, agent.filePath)
+
       agents.push(agent)
     } catch (e) {
       console.error(`Skipping malformed agent file: ${file}`, e.message)
+      errors.push({ file, error: e.message })
     }
   }
-  return agents
+  return { agents, errors }
+}
+
+/**
+ * Reassign a UUID to an agent file
+ * @param {string} filePath - Path to agent file
+ * @param {string} newId - New UUID to assign
+ */
+async function reassignUuid(filePath, newId) {
+  const raw = await fs.readFile(filePath, 'utf8')
+  const fmMatch = raw.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n([\s\S]*)$/m)
+  if (!fmMatch) throw new Error(`Agent file missing YAML front matter: ${filePath}`)
+
+  const meta = yaml.load(fmMatch[1])
+  const prompt = fmMatch[2].trim()
+
+  // Update the ID
+  meta.id = newId
+
+  // Rebuild front matter with the new ID
+  const frontMatter = yaml.dump({
+    id: newId,
+    name: meta.name,
+    reads: meta.reads || [],
+    review_target: meta.review_target || null,
+    loop: meta.loop || null,
+    timeout_seconds: meta.timeout_seconds || 300,
+    allowedCommands: meta.allowedCommands || [],
+    excludedCommands: meta.excludedCommands || [],
+  }).trim()
+
+  const hasComment = fmMatch[1].includes('# DO NOT EDIT')
+  const comment = hasComment ? '' : '# DO NOT EDIT — app identifier\n'
+  const content = `---\n${comment}${frontMatter}\n---\n\n${prompt}`
+  
+  await fs.writeFile(filePath, content, 'utf8')
 }
 
 /**
