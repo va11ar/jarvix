@@ -54,6 +54,13 @@ contextBridge.exposeInMainWorld('api', {
   configureAuth: (config) => ipcRenderer.invoke('auth:configure', config),
   testAuth: (config) => ipcRenderer.invoke('auth:test', config),
 
+  // Qwen Installation
+  checkQwenInstalled: (customPath) => ipcRenderer.invoke('qwen:check-installed', customPath),
+  browseQwenInstallation: () => ipcRenderer.invoke('qwen:browse-installation'),
+  setQwenPath: (qwenPath) => ipcRenderer.invoke('qwen:set-path', qwenPath),
+  onQwenNotFound: (cb) => ipcRenderer.on('qwen:not-found', (_, data) => cb(data)),
+  qwenUserResponse: (response) => ipcRenderer.send('qwen:user-response', response),
+
   // Window controls
   minimizeWindow: () => ipcRenderer.invoke('window:minimize'),
   maximizeWindow: () => ipcRenderer.invoke('window:maximize'),
@@ -66,6 +73,14 @@ contextBridge.exposeInMainWorld('api', {
   onAgentDefinitionChanged: (cb) => ipcRenderer.on('agent:definition-changed', (_, data) => cb(data)),
   onIncompleteRunDetected: (cb) => ipcRenderer.on('pipeline:incomplete-run-detected', (_, data) => cb(data)),
   onWindowFocus: (cb) => ipcRenderer.on('window:focus', (_, data) => cb(data)),
+
+  // Discovery pre-flight events
+  onDiscoveryStarted: (cb) => ipcRenderer.on('discovery:started', (_, data) => cb(data)),
+  onDiscoveryComplete: (cb) => ipcRenderer.on('discovery:complete', (_, data) => cb(data)),
+  onDiscoveryError: (cb) => ipcRenderer.on('discovery:error', (_, data) => cb(data)),
+  discoveryUserApprove: () => ipcRenderer.send('discovery:user-approve'),
+  discoveryUserSandbox: () => ipcRenderer.send('discovery:user-sandbox'),
+  discoveryUserAbort: () => ipcRenderer.send('discovery:user-abort'),
 
   // Cleanup
   removeAllListeners: (channel) => ipcRenderer.removeAllListeners(channel),

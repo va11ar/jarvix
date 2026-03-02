@@ -19,6 +19,11 @@ const STEP_STATUSES = {
   SKIPPED: 'skipped',
 }
 
+// Agent roles — used to trigger pre-flight behaviours
+const AGENT_ROLES = {
+  PROGRAMMER: 'programmer',
+}
+
 // IPC channel names — never hardcode these inline
 const IPC = {
   // Project
@@ -67,6 +72,13 @@ const IPC = {
   AUTH_CONFIGURE: 'auth:configure',
   AUTH_TEST: 'auth:test',
 
+  // Qwen installation
+  QWEN_CHECK_INSTALLED: 'qwen:check-installed',
+  QWEN_BROWSE_INSTALLATION: 'qwen:browse-installation',
+  QWEN_SET_PATH: 'qwen:set-path',
+  QWEN_NOT_FOUND: 'qwen:not-found',
+  QWEN_USER_RESPONSE: 'qwen:user-response',
+
   // Window controls
   WINDOW_MINIMIZE: 'window:minimize',
   WINDOW_MAXIMIZE: 'window:maximize',
@@ -80,6 +92,14 @@ const IPC = {
   INCOMPLETE_RUN_DETECTED: 'pipeline:incomplete-run-detected',
   STARTUP_AUTH_INVALID: 'startup:auth-invalid',
   WINDOW_FOCUS: 'window:focus',
+
+  // Discovery pre-flight
+  DISCOVERY_STARTED: 'discovery:started',
+  DISCOVERY_COMPLETE: 'discovery:complete',
+  DISCOVERY_ERROR: 'discovery:error',
+  DISCOVERY_USER_APPROVE: 'discovery:user-approve',
+  DISCOVERY_USER_SANDBOX: 'discovery:user-sandbox',
+  DISCOVERY_USER_ABORT: 'discovery:user-abort',
 }
 
 // Hardcoded exclude list — always written into .qwen/settings.json tools.exclude
@@ -184,6 +204,7 @@ const STACK_DEFAULTS = {
 module.exports = {
   PIPELINE_STATES,
   STEP_STATUSES,
+  AGENT_ROLES,
   IPC,
   HARDCODED_EXCLUDE,
   STACK_DEFAULTS,

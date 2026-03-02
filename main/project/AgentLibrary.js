@@ -40,6 +40,8 @@ async function parseAgentFile(filePath) {
     timeout_seconds: meta.timeout_seconds || 300,
     allowedCommands: Array.isArray(meta.allowedCommands) ? meta.allowedCommands : [],
     excludedCommands: Array.isArray(meta.excludedCommands) ? meta.excludedCommands : [],
+    // Agent role — only 'programmer' triggers pre-flight discovery. Any other value is treated as null.
+    role: meta.role === 'programmer' ? 'programmer' : null,
     prompt,
   }
 }

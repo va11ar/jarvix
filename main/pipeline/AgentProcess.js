@@ -10,11 +10,12 @@ const ActivityLog = require('./ActivityLog')
 const PIPELINE_STATUS_REGEX = /^PIPELINE_STATUS:\s*(DONE|ERROR)\s*\|?\s*(ISSUES:\s*(true|false)|REASON:\s*.+)?$/m
 
 class AgentProcess {
-  constructor(agent, projectPath, outputFilePath, win) {
+  constructor(agent, projectPath, outputFilePath, win, useSandbox = false) {
     this.agent = agent
     this.projectPath = projectPath
     this.outputFilePath = outputFilePath
     this.win = win
+    this.useSandbox = useSandbox
     this.process = null
     this.poller = null
     this.timeoutId = null
@@ -57,19 +58,25 @@ class AgentProcess {
       const fullPrompt = promptParts.join('')
 
       // Spawn the Qwen process
+      // useSandbox: spawn with --approval-mode yolo (per §6.2)
+      const approvalMode = this.useSandbox ? 'yolo' : 'auto-edit'
+
       const qwenArgs = [
         '-p',
         fullPrompt,
         '--approval-mode',
-        'auto-edit',
+        approvalMode,
         '--output-format',
         'stream-json',
+        '--auth-type',
+        'openai',
       ]
 
       this.process = spawn('qwen', qwenArgs, {
-        cwd: path.join(this.projectPath, 'Output'),
+        cwd: this.projectPath,
         detached: true,
         stdio: ['ignore', 'pipe', 'pipe'],
+        env: { ...process.env, HOME: os.homedir() },
       })
 
       // Handle stdout for errors
@@ -207,6 +214,7 @@ class AgentProcess {
   /**
    * Write merged settings.json for this agent
    * Project baseline + agent overrides, with HARDCODED_EXCLUDE always present
+   * Also merges global model settings to prevent CLI config errors
    */
   async _writeAgentSettings() {
     const settingsPath = path.join(this.projectPath, '.qwen', 'settings.json')
@@ -219,6 +227,16 @@ class AgentProcess {
       baseline = JSON.parse(raw)
     } catch {
       baseline = { tools: { approvalMode: 'auto-edit', allowed: [], exclude: [] } }
+    }
+
+    // Read global settings to merge model config
+    let globalSettings = {}
+    try {
+      const globalSettingsPath = path.join(os.homedir(), '.qwen', 'settings.json')
+      const globalRaw = await fs.readFile(globalSettingsPath, 'utf8')
+      globalSettings = JSON.parse(globalRaw)
+    } catch {
+      // Global settings not found - continue without
     }
 
     // Merge agent overrides
@@ -252,6 +270,14 @@ class AgentProcess {
         exclude: Array.from(excluded),
       },
     }
+
+    // Merge global model settings if present
+    if (globalSettings?.model) {
+      merged.model = globalSettings.model
+    }
+
+    // Note: Do NOT merge security.auth - the CLI has a bug where having security.auth
+    // in settings.json causes resolveModelConfig to fail. Auth comes from ~/.qwen/.env instead.
 
     await fs.writeFile(settingsPath, JSON.stringify(merged, null, 2), 'utf8')
   }

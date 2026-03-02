@@ -176,4 +176,44 @@ async function updatePipeline(projectPath, steps) {
   await fs.writeFile(filePath, JSON.stringify({ steps }, null, 2), 'utf8')
 }
 
-module.exports = { create, open, validate, listAll, updatePipeline }
+/**
+ * Add approved commands to the project baseline.json only.
+ * settings.json is managed exclusively by AgentProcess._writeAgentSettings() and
+ * _restoreProjectSettings(). On project open, settings.json is restored from baseline.json
+ * if they differ, so updating baseline.json ensures the approved commands are included.
+ * @param {string} projectPath - Project path
+ * @param {string[]} commands - Array of command strings (e.g., 'npm install')
+ * @returns {Promise<{ok: boolean, error?: string}>}
+ */
+async function addApprovedCommands(projectPath, commands) {
+  try {
+    const baselinePath = path.join(projectPath, '.qwen', 'baseline.json')
+    const baseline = JSON.parse(await fs.readFile(baselinePath, 'utf8'))
+
+    // Build the full pattern strings
+    const newEntries = commands.map(cmd => `run_shell_command(${cmd})`)
+
+    // Get existing allowed commands
+    const existingAllowed = new Set(baseline.tools?.allowed || [])
+
+    // Add new commands (deduplicate)
+    for (const entry of newEntries) {
+      existingAllowed.add(entry)
+    }
+
+    // Update baseline
+    baseline.tools = {
+      ...baseline.tools,
+      allowed: [...existingAllowed],
+    }
+
+    // Write back to baseline.json only — settings.json is managed by AgentProcess
+    await fs.writeFile(baselinePath, JSON.stringify(baseline, null, 2), 'utf8')
+
+    return { ok: true }
+  } catch (e) {
+    return { error: `Failed to add approved commands: ${e.message}` }
+  }
+}
+
+module.exports = { create, open, validate, listAll, updatePipeline, addApprovedCommands }

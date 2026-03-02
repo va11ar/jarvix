@@ -37,6 +37,11 @@ const state = {
 
   // Edit warning dialog state
   editingAgentId: null,
+
+  // Discovery pre-flight state per §10
+  preflightPhase: null, // null | 'loading' | 'choice' | 'sandbox-warning' | 'approve-list' | 'decline-warning'
+  preflightDelta: [],   // Discovered commands not in baseline
+  preflightDockerError: false,
 }
 
 const NP_STEP_SUBTITLES = [
@@ -97,6 +102,24 @@ function setupIPCListeners() {
 
   window.api.onWindowFocus(() => {
     handleWindowFocus()
+  })
+
+  // Discovery pre-flight listeners
+  window.api.onDiscoveryStarted(() => {
+    handleDiscoveryStarted()
+  })
+
+  window.api.onDiscoveryComplete((data) => {
+    handleDiscoveryComplete(data)
+  })
+
+  window.api.onDiscoveryError((data) => {
+    handleDiscoveryError(data)
+  })
+
+  // Qwen installation listener
+  window.api.onQwenNotFound((data) => {
+    handleQwenNotFound(data)
   })
 }
 
@@ -253,6 +276,310 @@ function handlePipelineStatus(data) {
   updateDetailPanel()
   updateAgentControls()
   setPipelineControlsDisabled(state.pipelineSteps.length === 0)
+}
+
+// ─── Discovery Pre-flight Handlers ──────────────────────────────────────────
+
+function handleDiscoveryStarted() {
+  // State A — Loading screen
+  state.preflightPhase = 'loading'
+  state.preflightDockerError = false
+  showOverlay('overlay-discovery')
+}
+
+function handleDiscoveryComplete(data) {
+  // State B — Pre-flight modal
+  hideOverlay('overlay-discovery')
+  state.preflightPhase = 'choice'
+  state.preflightDelta = data.delta || []
+  renderPreflightModal()
+  showDialog('dialog-preflight')
+}
+
+function handleDiscoveryError(data) {
+  hideOverlay('overlay-discovery')
+  state.preflightDockerError = !!data.dockerRequired
+  state.preflightPhase = data.dockerRequired ? 'sandbox-warning' : 'decline-warning'
+  renderPreflightModal()
+  showDialog('dialog-preflight')
+}
+
+function renderPreflightModal() {
+  const body = document.getElementById('preflight-body')
+  const footer = document.getElementById('preflight-footer')
+  const title = document.getElementById('preflight-title')
+
+  // Clear existing content
+  body.innerHTML = ''
+  footer.innerHTML = ''
+
+  switch (state.preflightPhase) {
+    case 'choice':
+      renderPreflightChoice(body, footer, title)
+      break
+    case 'sandbox-warning':
+      renderPreflightSandboxWarning(body, footer, title)
+      break
+    case 'approve-list':
+      renderPreflightApproveList(body, footer, title)
+      break
+    case 'decline-warning':
+      renderPreflightDeclineWarning(body, footer, title)
+      break
+  }
+}
+
+function renderPreflightChoice(body, footer, title) {
+  title.textContent = 'The next step will write code and execute commands'
+
+  body.innerHTML = `
+    <p style="color:var(--text-dim);line-height:1.6;margin-bottom:16px;">
+      The next pipeline step is a programmer agent. It will write code and run shell commands
+      on your file system.
+    </p>
+    <p style="color:var(--text-dim);line-height:1.6;margin-bottom:16px;">
+      Jarvix can scan your project documents and infer which commands this agent will likely need.
+      You can then review and approve them.
+    </p>
+    <p style="color:var(--text-dim);line-height:1.6;">
+      Alternatively, if you trust the AI provider you are using, you can allow the agent to run
+      any command inside a sandboxed environment. Sandbox mode uses Docker to isolate the agent
+      from your system. Note: sandbox mode requires Docker to be running, and while it provides
+      meaningful protection, it is not a complete safety net.
+    </p>
+  `
+
+  const sandboxBtn = document.createElement('button')
+  sandboxBtn.className = 'footer-btn'
+  sandboxBtn.textContent = 'Use Sandbox Mode'
+  sandboxBtn.addEventListener('click', () => {
+    window.api.discoveryUserSandbox()
+  })
+
+  const inferBtn = document.createElement('button')
+  inferBtn.className = 'footer-btn primary'
+  inferBtn.textContent = 'Infer Commands'
+  inferBtn.addEventListener('click', () => {
+    state.preflightPhase = 'approve-list'
+    renderPreflightModal()
+  })
+
+  footer.appendChild(sandboxBtn)
+  footer.appendChild(inferBtn)
+}
+
+function renderPreflightSandboxWarning(body, footer, title) {
+  title.textContent = 'Sandbox mode: important limitations'
+
+  if (state.preflightDockerError) {
+    body.innerHTML = `
+      <p style="color:var(--text-dim);line-height:1.6;margin-bottom:16px;">
+        Sandbox mode requires Docker. Docker was not detected on this system.
+        Please install and start Docker, then try again.
+      </p>
+    `
+
+    const retryBtn = document.createElement('button')
+    retryBtn.className = 'footer-btn'
+    retryBtn.textContent = 'Retry'
+    retryBtn.addEventListener('click', () => {
+      window.api.discoveryUserSandbox()
+    })
+
+    const backBtn = document.createElement('button')
+    backBtn.className = 'footer-btn primary'
+    backBtn.textContent = 'Choose Differently'
+    backBtn.addEventListener('click', () => {
+      state.preflightPhase = 'choice'
+      state.preflightDockerError = false
+      renderPreflightModal()
+    })
+
+    footer.appendChild(retryBtn)
+    footer.appendChild(backBtn)
+  } else {
+    body.innerHTML = `
+      <p style="color:var(--text-dim);line-height:1.6;margin-bottom:16px;">
+        In sandbox mode, the programmer agent can execute any shell command. Docker provides
+        isolation from your file system, but sandbox mode is not a complete safety net.
+      </p>
+      <p style="color:var(--text-dim);line-height:1.6;">
+        Are you sure you want to continue without command restrictions?
+      </p>
+    `
+
+    const continueBtn = document.createElement('button')
+    continueBtn.className = 'footer-btn'
+    continueBtn.textContent = 'Continue with Sandbox'
+    continueBtn.addEventListener('click', () => {
+      window.api.discoveryUserSandbox()
+    })
+
+    const backBtn = document.createElement('button')
+    backBtn.className = 'footer-btn primary'
+    backBtn.textContent = 'Go Back'
+    backBtn.addEventListener('click', () => {
+      state.preflightPhase = 'choice'
+      renderPreflightModal()
+    })
+
+    footer.appendChild(continueBtn)
+    footer.appendChild(backBtn)
+  }
+}
+
+function renderPreflightApproveList(body, footer, title) {
+  title.textContent = 'Approve commands for the programmer agent'
+
+  if (state.preflightDelta.length === 0) {
+    // All commands already approved — close modal and continue
+    hideDialog('dialog-preflight')
+    window.api.discoveryUserApprove()
+    return
+  }
+
+  const commandListHtml = state.preflightDelta.map(cmd =>
+    `<div class="command-row-readonly">${escapeHtml(cmd)}</div>`
+  ).join('')
+
+  body.innerHTML = `
+    <div style="margin-bottom:16px;">
+      ${commandListHtml}
+    </div>
+    <p style="color:var(--text-dim);line-height:1.6;font-size:10px;">
+      These commands were not found in your current project whitelist. The programmer agent will
+      need them to complete its work. If you decline, the agent will not be able to run these
+      commands and the pipeline will fail.
+    </p>
+  `
+
+  const declineBtn = document.createElement('button')
+  declineBtn.className = 'footer-btn'
+  declineBtn.textContent = 'Decline'
+  declineBtn.addEventListener('click', () => {
+    state.preflightPhase = 'decline-warning'
+    renderPreflightModal()
+  })
+
+  const allowBtn = document.createElement('button')
+  allowBtn.className = 'footer-btn primary'
+  allowBtn.textContent = 'Allow All'
+  allowBtn.addEventListener('click', () => {
+    window.api.discoveryUserApprove()
+    hideDialog('dialog-preflight')
+  })
+
+  footer.appendChild(declineBtn)
+  footer.appendChild(allowBtn)
+}
+
+function renderPreflightDeclineWarning(body, footer, title) {
+  title.textContent = 'Pipeline cannot continue without these commands'
+
+  body.innerHTML = `
+    <p style="color:var(--text-dim);line-height:1.6;margin-bottom:16px;">
+      The programmer agent requires these commands to do its work. Without them, the pipeline
+      will fail when the agent attempts to run them.
+    </p>
+  `
+
+  const approveBtn = document.createElement('button')
+  approveBtn.className = 'footer-btn'
+  approveBtn.textContent = 'Approve Commands'
+  approveBtn.addEventListener('click', () => {
+    state.preflightPhase = 'approve-list'
+    renderPreflightModal()
+  })
+
+  const abortBtn = document.createElement('button')
+  abortBtn.className = 'footer-btn primary'
+  abortBtn.textContent = 'Decline and Abort'
+  abortBtn.addEventListener('click', () => {
+    window.api.discoveryUserAbort()
+    hideDialog('dialog-preflight')
+  })
+
+  footer.appendChild(approveBtn)
+  footer.appendChild(abortBtn)
+}
+
+// ─── Qwen Installation Not Found Handler ────────────────────────────────────
+
+let qwenResponseCallback = null
+
+function handleQwenNotFound(data) {
+  // Show the Qwen not found dialog
+  const commandDisplay = document.getElementById('qwen-command-display')
+  if (commandDisplay) {
+    commandDisplay.textContent = data.command || 'qwen'
+  }
+  
+  // Log to Activity Log
+  appendLogLine('Could not find Qwen CLI installation', 'error')
+  
+  // Show dialog
+  showDialog('dialog-qwen-not-found')
+  
+  // Setup button handlers
+  const okBtn = document.getElementById('btn-qwen-ok')
+  const browseBtn = document.getElementById('btn-qwen-browse')
+  
+  // Remove old listeners by cloning
+  const newOkBtn = okBtn.cloneNode(true)
+  const newBrowseBtn = browseBtn.cloneNode(true)
+  okBtn.parentNode.replaceChild(newOkBtn, okBtn)
+  browseBtn.parentNode.replaceChild(newBrowseBtn, browseBtn)
+  
+  // OK button - dismiss dialog and abort
+  newOkBtn.addEventListener('click', () => {
+    hideDialog('dialog-qwen-not-found')
+    if (qwenResponseCallback) {
+      qwenResponseCallback({ action: 'cancel' })
+      qwenResponseCallback = null
+    }
+  })
+  
+  // Browse button - open file explorer
+  newBrowseBtn.addEventListener('click', async () => {
+    try {
+      const selectedPath = await window.api.browseQwenInstallation()
+      if (selectedPath) {
+        // User selected a path - save it and continue
+        const saveResult = await window.api.setQwenPath(selectedPath)
+        if (saveResult.error) {
+          appendLogLine('Failed to save Qwen path: ' + saveResult.error, 'error')
+          hideDialog('dialog-qwen-not-found')
+          if (qwenResponseCallback) {
+            qwenResponseCallback({ action: 'cancel' })
+            qwenResponseCallback = null
+          }
+          return
+        }
+        
+        // Path saved - notify main process to continue
+        hideDialog('dialog-qwen-not-found')
+        if (qwenResponseCallback) {
+          qwenResponseCallback({ action: 'browse', path: selectedPath })
+          qwenResponseCallback = null
+        }
+      } else {
+        // User canceled the folder picker - stay on dialog
+        appendLogLine('Folder selection canceled', 'info')
+      }
+    } catch (e) {
+      appendLogLine('Failed to browse for Qwen installation: ' + e.message, 'error')
+      hideDialog('dialog-qwen-not-found')
+      if (qwenResponseCallback) {
+        qwenResponseCallback({ action: 'cancel' })
+        qwenResponseCallback = null
+      }
+    }
+  })
+  
+  // Setup the callback that will be called when user responds
+  qwenResponseCallback = (response) => {
+    window.api.qwenUserResponse(response)
+  }
 }
 
 // ─── Agent Definition Changed Handler ───────────────────────────────────────
@@ -1800,6 +2127,15 @@ function showDialog(id) {
 }
 
 function hideDialog(id) {
+  document.getElementById(id).classList.add('hidden')
+}
+
+// Overlay utilities (same as dialogs, different semantic name)
+function showOverlay(id) {
+  document.getElementById(id).classList.remove('hidden')
+}
+
+function hideOverlay(id) {
   document.getElementById(id).classList.add('hidden')
 }
 

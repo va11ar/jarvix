@@ -1,10 +1,15 @@
 const path = require('path')
 const crypto = require('crypto')
-const { PIPELINE_STATES, STEP_STATUSES, IPC } = require('../constants')
+const { PIPELINE_STATES, STEP_STATUSES, IPC, AGENT_ROLES } = require('../constants')
 const Checkpoint = require('../checkpoint/Checkpoint')
 const ActivityLog = require('./ActivityLog')
 const AgentLibrary = require('../project/AgentLibrary')
 const AgentProcess = require('./AgentProcess').AgentProcess
+const { runDiscovery } = require('./CommandDiscovery')
+const ProjectManager = require('../project/ProjectManager')
+const Settings = require('../settings')
+const { spawn } = require('child_process')
+const fs = require('fs/promises')
 
 class PipelineRunner {
   constructor() {
@@ -18,6 +23,11 @@ class PipelineRunner {
     this.abortController = null
     this.pausePromise = null
     this.resumeCallback = null
+    // Pre-flight discovery state per §8
+    this.programmerStepIndex = null
+    this.commandDiscoveryDone = false
+    this.useSandboxMode = false
+    this.discoveryCommands = null
   }
 
   /**
@@ -33,6 +43,67 @@ class PipelineRunner {
         return { error: 'Pipeline already running' }
       }
 
+      // Check if Qwen CLI is installed before starting
+      const settings = await Settings.load()
+      const qwenPath = settings.qwenPath || 'qwen'
+      const qwenCheck = await Settings.checkQwenInstalled(qwenPath)
+      
+      if (!qwenCheck.installed) {
+        // Send notification to renderer to show dialog
+        win.webContents.send(IPC.QWEN_NOT_FOUND, { command: qwenCheck.command })
+        
+        // Wait for user response via callback
+        return await new Promise((resolve) => {
+          win.qwenResponseCallback = async (response) => {
+            win.qwenResponseCallback = null
+            
+            if (response.action === 'cancel') {
+              // User clicked OK without browsing - abort pipeline start
+              resolve({ error: 'Qwen CLI not found' })
+              return
+            }
+            
+            if (response.action === 'browse' && response.path) {
+              // User browsed and selected a path
+              // Save the path
+              await Settings.save({ ...settings, qwenPath: response.path })
+              
+              // Re-check with the new path
+              const recheck = await Settings.checkQwenInstalled(response.path)
+              if (!recheck.installed) {
+                // Still not found - show error and abort
+                resolve({ error: 'Selected path does not contain Qwen CLI' })
+                return
+              }
+              
+              // Path is valid - continue with pipeline start
+              resolve(await this._continueStart(projectPath, resumeFrom, win))
+              return
+            }
+            
+            // Fallback - abort
+            resolve({ error: 'Qwen CLI not found' })
+          }
+        })
+      }
+      
+      // Qwen is installed - continue with normal start
+      return await this._continueStart(projectPath, resumeFrom, win)
+    } catch (e) {
+      this.state = PIPELINE_STATES.ERROR
+      return { error: e.message }
+    }
+  }
+
+  /**
+   * Continue pipeline start after Qwen check passes
+   * @param {string} projectPath - Project path
+   * @param {number|null} resumeFrom - Step index to resume from, or null for fresh start
+   * @param {BrowserWindow} win - BrowserWindow instance
+   * @returns {Promise<{ok: boolean, error?: string}>}
+   */
+  async _continueStart(projectPath, resumeFrom, win) {
+    try {
       this.currentProjectPath = projectPath
       this.currentWin = win
       this.state = PIPELINE_STATES.RUNNING
@@ -56,6 +127,21 @@ class PipelineRunner {
           this.agentSnapshots.set(step.agent_id, agent)
         }
       }
+
+      // Find the first programmer step index per §3
+      this.programmerStepIndex = null
+      for (let i = 0; i < this.steps.length; i++) {
+        const agent = this.agentSnapshots.get(this.steps[i].agent_id)
+        if (agent && agent.role === AGENT_ROLES.PROGRAMMER) {
+          this.programmerStepIndex = i
+          break
+        }
+      }
+
+      // Reset discovery state for this run
+      this.commandDiscoveryDone = false
+      this.useSandboxMode = false
+      this.discoveryCommands = null
 
       // Determine starting step
       let startIndex = 0
@@ -162,6 +248,25 @@ class PipelineRunner {
         continue
       }
 
+      // Pre-flight hook for programmer agent per §3 and §8
+      if (i === this.programmerStepIndex && !this.commandDiscoveryDone) {
+        const preflightResult = await this._runPreflight(agent)
+        this.commandDiscoveryDone = true
+
+        if (preflightResult.aborted) {
+          // User declined and aborted in State E
+          this.state = PIPELINE_STATES.IDLE
+          await ActivityLog.append(this.currentProjectPath, 'Pipeline aborted — user declined command approval at programmer pre-flight', 'warn')
+          return
+        }
+
+        if (preflightResult.error) {
+          await ActivityLog.append(this.currentProjectPath, `Pre-flight error: ${preflightResult.error}`, 'error')
+          this.state = PIPELINE_STATES.ERROR
+          return
+        }
+      }
+
       // Update checkpoint
       await Checkpoint.updateStep(this.currentProjectPath, i, {
         status: STEP_STATUSES.RUNNING,
@@ -176,8 +281,14 @@ class PipelineRunner {
       const outputFileName = path.basename(agent.filePath, '.md') + '.md'
       const outputFilePath = path.join(this.currentProjectPath, 'Context', outputFileName)
 
-      // Spawn agent
-      this.currentAgentProcess = new AgentProcess(agent, this.currentProjectPath, outputFilePath, this.currentWin)
+      // Spawn agent — use sandbox mode if pre-flight selected it
+      this.currentAgentProcess = new AgentProcess(
+        agent,
+        this.currentProjectPath,
+        outputFilePath,
+        this.currentWin,
+        this.useSandboxMode
+      )
       const spawnResult = await this.currentAgentProcess.spawn()
 
       if (!spawnResult.ok) {
@@ -559,6 +670,181 @@ class PipelineRunner {
       const ProjectManager = require('../project/ProjectManager')
       await ProjectManager.updatePipeline(this.currentProjectPath, steps)
     }
+  }
+
+  /**
+   * Run the pre-flight discovery flow before the programmer agent spawns
+   * Per §5 (States A through F) and §6
+   * @param {Object} programmerAgent - The programmer agent snapshot
+   * @returns {Promise<{aborted?: boolean, error?: string, sandbox?: boolean}>}
+   */
+  async _runPreflight(programmerAgent) {
+    const projectPath = this.currentProjectPath
+    const win = this.currentWin
+
+    try {
+      // Check if discovery output exists from a prior run (State F)
+      const discoveryOutputPath = path.join(projectPath, '.jarvix', 'discovery-output.json')
+      let commands = null
+
+      // State A — Loading screen
+      win.webContents.send(IPC.DISCOVERY_STARTED)
+
+      try {
+        // Try to read existing discovery output
+        const existingOutput = await fs.readFile(discoveryOutputPath, 'utf8')
+        commands = JSON.parse(existingOutput)
+        if (!Array.isArray(commands)) {
+          commands = null
+        }
+      } catch {
+        // No existing output — run discovery
+      }
+
+      if (!commands) {
+        // Run discovery agent
+        const settings = await Settings.load()
+        const qwenPath = settings.qwenPath || 'qwen'
+
+        try {
+          const result = await runDiscovery(projectPath, programmerAgent, qwenPath)
+          commands = result.commands
+        } catch (e) {
+          // Discovery failed — surface error to UI
+          win.webContents.send(IPC.DISCOVERY_ERROR, { message: e.message })
+          // Wait for user to acknowledge (they'll abort or retry via UI)
+          return await new Promise((resolve) => {
+            const handler = (_, data) => {
+              if (data.action === 'abort') {
+                win.webContents.removeListener('discovery:user-abort', handler)
+                resolve({ aborted: true })
+              }
+            }
+            win.webContents.on('discovery:user-abort', handler)
+          })
+        }
+      }
+
+      // Load baseline to compute delta
+      const baselinePath = path.join(projectPath, '.qwen', 'baseline.json')
+      const baseline = JSON.parse(await fs.readFile(baselinePath, 'utf8'))
+      const existingAllowed = new Set(baseline.tools?.allowed || [])
+
+      // Compute delta: commands not already in baseline
+      const delta = commands.filter(cmd => !existingAllowed.has(`run_shell_command(${cmd})`))
+
+      // State B — Pre-flight modal
+      // Send delta to renderer and wait for user choice
+      win.webContents.send(IPC.DISCOVERY_COMPLETE, { delta })
+
+      // Wait for user response via IPC
+      return await new Promise((resolve) => {
+        const cleanup = () => {
+          win.webContents.removeListener('discovery:user-approve', onApprove)
+          win.webContents.removeListener('discovery:user-sandbox', onSandbox)
+          win.webContents.removeListener('discovery:user-abort', onAbort)
+        }
+
+        const onApprove = async () => {
+          cleanup()
+          try {
+            // Write approved commands to baseline.json
+            const result = await ProjectManager.addApprovedCommands(projectPath, delta)
+            if (result.error) {
+              resolve({ error: result.error })
+              return
+            }
+
+            // Delete discovery output on successful approval
+            try {
+              await fs.unlink(discoveryOutputPath)
+            } catch {
+              // Ignore
+            }
+
+            resolve({})
+          } catch (e) {
+            resolve({ error: e.message })
+          }
+        }
+
+        const onSandbox = async () => {
+          cleanup()
+          // Check Docker availability
+          const dockerAvailable = await this._checkDocker()
+          if (!dockerAvailable) {
+            // Send Docker not available error — renderer will show retry/choose differently
+            win.webContents.send(IPC.DISCOVERY_ERROR, {
+              message: 'Sandbox mode requires Docker. Docker was not detected on this system.',
+              dockerRequired: true,
+            })
+            // Wait for retry or choose differently - set up new listeners
+            const onRetry = async () => {
+              win.webContents.removeListener('discovery:user-sandbox', onRetry)
+              win.webContents.removeListener('discovery:user-approve', onChooseDifferently)
+              win.webContents.removeListener('discovery:user-abort', onChooseDifferently)
+              const retryDocker = await this._checkDocker()
+              if (retryDocker) {
+                this.useSandboxMode = true
+                resolve({ sandbox: true })
+              } else {
+                // Still not available - send error again and re-listen
+                win.webContents.send(IPC.DISCOVERY_ERROR, {
+                  message: 'Sandbox mode requires Docker. Docker was not detected on this system.',
+                  dockerRequired: true,
+                })
+                win.webContents.once('discovery:user-sandbox', onRetry)
+                win.webContents.once('discovery:user-approve', onChooseDifferently)
+                win.webContents.once('discovery:user-abort', onChooseDifferently)
+              }
+            }
+            const onChooseDifferently = () => {
+              win.webContents.removeListener('discovery:user-sandbox', onRetry)
+              win.webContents.removeListener('discovery:user-approve', onChooseDifferently)
+              win.webContents.removeListener('discovery:user-abort', onChooseDifferently)
+              // Go back to choice phase - send complete event again to re-show the choice modal
+              win.webContents.send(IPC.DISCOVERY_COMPLETE, { delta })
+              // Set up listeners for the choice phase again
+              win.webContents.once('discovery:user-approve', onApprove)
+              win.webContents.once('discovery:user-sandbox', onSandbox)
+              win.webContents.once('discovery:user-abort', onAbort)
+            }
+            win.webContents.once('discovery:user-sandbox', onRetry)
+            win.webContents.once('discovery:user-approve', onChooseDifferently)
+            win.webContents.once('discovery:user-abort', onChooseDifferently)
+            return
+          }
+
+          this.useSandboxMode = true
+          resolve({ sandbox: true })
+        }
+
+        const onAbort = () => {
+          cleanup()
+          resolve({ aborted: true })
+        }
+
+        win.webContents.once('discovery:user-approve', onApprove)
+        win.webContents.once('discovery:user-sandbox', onSandbox)
+        win.webContents.once('discovery:user-abort', onAbort)
+      })
+    } catch (e) {
+      return { error: e.message }
+    }
+  }
+
+  /**
+   * Check if Docker is available
+   * @returns {Promise<boolean>}
+   */
+  async _checkDocker() {
+    return await new Promise((resolve) => {
+      const proc = spawn('docker', ['info'], {
+        stdio: ['ignore', 'ignore', 'ignore'],
+      })
+      proc.on('error', () => resolve(false))
+      proc.on('close', (code) => resolve(code === 0))
+    })
   }
 
   /**

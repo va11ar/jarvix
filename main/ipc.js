@@ -118,6 +118,32 @@ function registerIpcHandlers(win) {
   ipcMain.handle('auth:configure', h((config) => configureQwenAuth(config)))
   ipcMain.handle('auth:test', h((config) => testQwenAuth(config)))
 
+  // ── Qwen Installation ────────────────────────────────────────────────────
+  ipcMain.handle('qwen:check-installed', h(async (customPath) => {
+    const Settings = require('./settings')
+    return await Settings.checkQwenInstalled(customPath)
+  }))
+  ipcMain.handle('qwen:browse-installation', h(async () => {
+    const result = await dialog.showOpenDialog(win, {
+      properties: ['openDirectory'],
+      title: 'Select Qwen CLI Installation Folder',
+    })
+    return result.canceled ? null : result.filePaths[0]
+  }))
+  ipcMain.handle('qwen:set-path', h(async (qwenPath) => {
+    const settings = await Settings.load()
+    settings.qwenPath = qwenPath
+    return await Settings.save(settings)
+  }))
+
+  // Listen for Qwen dialog user response
+  ipcMain.on('qwen:user-response', (event, response) => {
+    // Forward to PipelineRunner via a handler set on the win object
+    if (win && win.qwenResponseCallback) {
+      win.qwenResponseCallback(response)
+    }
+  })
+
   // ── Window controls (custom frame) ────────────────────────────────────────
   ipcMain.handle('window:minimize', h(() => win.minimize()))
   ipcMain.handle('window:maximize', h(() => { win.isMaximized() ? win.unmaximize() : win.maximize() }))

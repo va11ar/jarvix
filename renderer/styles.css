@@ -107,23 +107,6 @@ html, body {
   font-weight: 500;
 }
 
-#briefbar {
-  width: 100%;
-  padding: 5px 18px;
-  font-size: 11px;
-  font-family: var(--sans);
-  font-style: italic;
-  color: var(--text-dim);
-  background: var(--bg1);
-  border-bottom: 1px solid var(--border);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  flex-shrink: 0;
-  -webkit-app-region: drag;
-  user-select: none;
-}
-
 .tb-controls {
   display: flex;
   align-items: center;
@@ -1158,6 +1141,23 @@ html, body {
   color: var(--text-faint);
   flex-shrink: 0;
   cursor: default;
+}
+
+/* Read-only command row for pre-flight approval list */
+.command-row-readonly {
+  display: flex;
+  align-items: center;
+  padding: 4px 8px;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 10px;
+  margin-bottom: 3px;
+}
+.command-row-readonly:last-child {
+  margin-bottom: 0;
 }
 .lock-icon::after {
   content: attr(data-tip);

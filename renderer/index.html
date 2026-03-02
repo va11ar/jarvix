@@ -55,13 +55,6 @@
     </div>
 
     <!-- ══════════════════════════════════════════════
-         BRIEF BAR
-    ══════════════════════════════════════════════════ -->
-    <div id="briefbar">
-      <span id="brief-text">No project brief loaded</span>
-    </div>
-
-    <!-- ══════════════════════════════════════════════
          MAIN AREA
     ══════════════════════════════════════════════════ -->
     <div id="main">
@@ -423,6 +416,48 @@
       <div class="dialog-footer">
         <button class="footer-btn" id="btn-auth-setup-cancel">Cancel</button>
         <button class="footer-btn primary" id="btn-auth-setup-save" disabled>Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Discovery Loading Overlay (State A) -->
+  <div class="overlay hidden" id="overlay-discovery">
+    <div class="dialog" style="width:400px;text-align:center;">
+      <div class="dialog-body" style="padding:40px 20px;">
+        <p style="color:var(--text);font-size:12px;margin-bottom:8px;">Analysing your project documents to infer required commands...</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Pre-flight Modal Dialog (States B through E) -->
+  <div class="overlay hidden" id="dialog-preflight">
+    <div class="dialog" style="width:520px;">
+      <div class="dialog-header">
+        <div class="dialog-title" id="preflight-title">The next step will write code and execute commands</div>
+      </div>
+      <div class="dialog-body" id="preflight-body" style="padding:16px;">
+        <!-- Content dynamically updated based on preflightPhase -->
+      </div>
+      <div class="dialog-footer" id="preflight-footer">
+        <!-- Buttons dynamically inserted based on preflightPhase -->
+      </div>
+    </div>
+  </div>
+
+  <!-- Qwen Installation Not Found Dialog -->
+  <div class="overlay hidden" id="dialog-qwen-not-found">
+    <div class="dialog" style="width:480px;">
+      <div class="dialog-header">
+        <div class="dialog-title">Qwen CLI Not Found</div>
+      </div>
+      <div class="dialog-body" style="padding:16px;">
+        <p style="color:var(--text-dim);margin-bottom:12px;">
+          Could not start Qwen CLI using <span id="qwen-command-display" style="font-family:var(--font-mono);color:var(--text);"></span>, please verify that you have Qwen installed on the system.
+        </p>
+      </div>
+      <div class="dialog-footer">
+        <button class="footer-btn" id="btn-qwen-ok">OK</button>
+        <button class="footer-btn primary" id="btn-qwen-browse">Browse to installation</button>
       </div>
     </div>
   </div>
