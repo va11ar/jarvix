@@ -84,6 +84,9 @@ const IPC = {
   WINDOW_MAXIMIZE: 'window:maximize',
   WINDOW_CLOSE: 'window:close',
 
+  // External
+  EXTERNAL_OPEN: 'external:open',
+
   // Main → Renderer events
   PIPELINE_STATUS: 'pipeline:status',
   AGENT_OUTPUT_UPDATED: 'agent:output-updated',

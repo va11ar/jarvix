@@ -142,6 +142,9 @@ function wireEventListeners() {
   document.getElementById('btn-maximize').addEventListener('click', () => window.api.maximizeWindow())
   document.getElementById('btn-close').addEventListener('click', () => window.api.closeWindow())
 
+  // File menu (JARVIX logo)
+  setupFileMenu()
+
   // Project brief edit
   document.getElementById('tb-project-name').addEventListener('click', async () => {
     if (!state.currentProject) return
@@ -341,9 +344,10 @@ function wireEventListeners() {
     }
   })
 
-  // Global click to hide context menu and cancel selection mode
+  // Global click to hide context menu and file menu, and cancel selection mode
   document.addEventListener('click', (e) => {
     hideContextMenu()
+    hideFileMenu()
     // Cancel selection mode if clicking outside an eligible agent
     // But NOT if clicking inside a dialog (to allow confirmation dialogs to work)
     if (selectionModeState) {
@@ -362,6 +366,105 @@ function wireEventListeners() {
       cancelSelectionMode()
     }
   })
+}
+
+// ─── File Menu (JARVIX Logo) ────────────────────────────────────────────────
+
+function setupFileMenu() {
+  const logoMenu = document.getElementById('tb-logo-menu')
+  const fileMenu = document.getElementById('file-menu')
+  const menuNew = document.getElementById('file-menu-new')
+  const menuOpen = document.getElementById('file-menu-open')
+  const menuFeedback = document.getElementById('file-menu-feedback')
+  const menuExit = document.getElementById('file-menu-exit')
+
+  // Toggle menu on logo click
+  logoMenu.addEventListener('click', (e) => {
+    e.stopPropagation()
+    const isHidden = fileMenu.classList.contains('hidden')
+    // Hide all other menus first
+    hideAllMenus()
+    if (isHidden) {
+      fileMenu.classList.remove('hidden')
+    }
+  })
+
+  // Prevent menu from closing when clicking on it
+  fileMenu.addEventListener('click', (e) => {
+    e.stopPropagation()
+  })
+
+  // Menu item handlers
+  menuNew.addEventListener('click', async (e) => {
+    e.stopPropagation()
+    hideFileMenu()
+    await handleFileMenuNew()
+  })
+
+  menuOpen.addEventListener('click', async (e) => {
+    e.stopPropagation()
+    hideFileMenu()
+    await handleFileMenuOpen()
+  })
+
+  menuFeedback.addEventListener('click', (e) => {
+    e.stopPropagation()
+    hideFileMenu()
+    handleFileMenuFeedback()
+  })
+
+  menuExit.addEventListener('click', (e) => {
+    e.stopPropagation()
+    hideFileMenu()
+    handleFileMenuExit()
+  })
+}
+
+function hideFileMenu() {
+  const fileMenu = document.getElementById('file-menu')
+  if (fileMenu) {
+    fileMenu.classList.add('hidden')
+  }
+}
+
+function hideAllMenus() {
+  hideFileMenu()
+  hideContextMenu()
+}
+
+/**
+ * Check if pipeline is in a valid state for menu actions
+ * Valid states: idle, paused, aborted
+ */
+function isPipelineStateValidForMenuAction() {
+  const validStates = ['idle', 'paused', 'aborted']
+  return validStates.includes(state.pipelineState)
+}
+
+async function handleFileMenuNew() {
+  if (!isPipelineStateValidForMenuAction()) {
+    appendLogLine('Can not execute action, pipeline needs to be in idle, paused or aborted state first', 'warn')
+    return
+  }
+  hideDialog('dialog-welcome')
+  openNewProjectDialog()
+}
+
+async function handleFileMenuOpen() {
+  if (!isPipelineStateValidForMenuAction()) {
+    appendLogLine('Can not execute action, pipeline needs to be in idle, paused or aborted state first', 'warn')
+    return
+  }
+  hideDialog('dialog-welcome')
+  await openProjectDialog()
+}
+
+function handleFileMenuFeedback() {
+  window.api.openExternal('https://tally.so/r/9qdYpQ')
+}
+
+function handleFileMenuExit() {
+  window.api.closeWindow()
 }
 
 // ─── Context Menu ───────────────────────────────────────────────────────────

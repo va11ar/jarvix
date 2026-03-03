@@ -73,6 +73,9 @@ contextBridge.exposeInMainWorld('api', {
   maximizeWindow: () => ipcRenderer.invoke('window:maximize'),
   closeWindow: () => ipcRenderer.invoke('window:close'),
 
+  // External
+  openExternal: (url) => ipcRenderer.invoke('external:open', url),
+
   // Main → Renderer push events
   onPipelineStatus: (cb) => ipcRenderer.on('pipeline:status', (_, data) => cb(data)),
   onAgentOutputUpdated: (cb) => ipcRenderer.on('agent:output-updated', (_, data) => cb(data)),

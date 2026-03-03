@@ -169,6 +169,9 @@ function registerIpcHandlers(win) {
   ipcMain.handle('window:minimize', h(() => win.minimize()))
   ipcMain.handle('window:maximize', h(() => { win.isMaximized() ? win.unmaximize() : win.maximize() }))
   ipcMain.handle('window:close',    h(() => win.close()))
+
+  // ── External ─────────────────────────────────────────────────────────────
+  ipcMain.handle('external:open', h((url) => shell.openExternal(url)))
 }
 
 module.exports = { registerIpcHandlers }
