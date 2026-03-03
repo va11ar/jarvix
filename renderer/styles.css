@@ -668,6 +668,78 @@ html, body {
 .meta-val.complete { color: var(--green); }
 .meta-val.error { color: var(--red); }
 
+/* Reviewer Status section (stacked layout) */
+.reviewer-status-section {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+}
+.reviewer-status-label {
+  font-size: 9px;
+  color: var(--text-faint);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  margin-bottom: 4px;
+}
+
+/* Reviewer Status dropdown in detail panel */
+.reviewer-status-select {
+  appearance: none;
+  -webkit-appearance: none;
+  background: var(--bg2);
+  border: 1px solid var(--border2);
+  border-radius: 3px;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 4px 28px 4px 8px;
+  cursor: pointer;
+  width: 100%;
+  box-sizing: border-box;
+}
+.reviewer-status-select:hover {
+  border-color: var(--border);
+}
+.reviewer-status-select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.reviewer-status-select option {
+  background: var(--bg2);
+  color: var(--text);
+}
+
+/* Max Loops Count input */
+.max-loops-input {
+  appearance: none;
+  -webkit-appearance: none;
+  background: var(--bg2);
+  border: 1px solid var(--border2);
+  border-radius: 3px;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 3px 6px;
+  width: 60px;
+}
+.max-loops-input:hover {
+  border-color: var(--border);
+}
+.max-loops-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.max-loops-input::-webkit-inner-spin-button,
+.max-loops-input::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+/* Hidden utility class */
+.hidden {
+  display: none !important;
+}
+
 .progress-section {
   padding: 8px 12px;
   border-bottom: 1px solid var(--border);
@@ -1479,4 +1551,63 @@ html, body {
   color: var(--amber);
   font-weight: 600;
   letter-spacing: 0.05em;
+}
+
+/* Agent Context Menu */
+.context-menu {
+  position: fixed;
+  background: var(--bg1);
+  border: 1px solid var(--border2);
+  border-radius: 3px;
+  padding: 4px 0;
+  min-width: 180px;
+  z-index: 10000;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+.context-menu-item {
+  padding: 8px 12px;
+  font-size: 11px;
+  color: var(--text);
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.context-menu-item:hover {
+  background: var(--bg2);
+}
+
+.context-menu-item:first-child {
+  border-radius: 2px 2px 0 0;
+}
+
+.context-menu-item:last-child {
+  border-radius: 0 0 2px 2px;
+}
+
+/* Eligible target highlighting for review target assignment */
+.eligible-target.agent-item,
+.eligible-target.library-agent,
+.eligible-target.pipeline-node {
+  cursor: pointer;
+  border: 1px solid var(--accent);
+  background: var(--accent-dim);
+  animation: eligible-pulse 1.5s ease-in-out infinite;
+}
+
+.eligible-target.agent-item:hover,
+.eligible-target.library-agent:hover,
+.eligible-target.pipeline-node:hover {
+  border-color: var(--accent);
+  background: var(--accent-dim);
+  filter: brightness(1.2);
+}
+
+@keyframes eligible-pulse {
+  0%, 100% {
+    box-shadow: 0 0 4px var(--accent-dim);
+  }
+  50% {
+    box-shadow: 0 0 12px var(--accent-dim);
+  }
 }

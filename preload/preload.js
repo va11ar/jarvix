@@ -14,6 +14,9 @@ contextBridge.exposeInMainWorld('api', {
   getAgent: (id) => ipcRenderer.invoke('agents:get', id),
   createAgent: (def) => ipcRenderer.invoke('agents:create', def),
   agentUsageCount: (id) => ipcRenderer.invoke('agents:usageCount', id),
+  openAgentEditor: (agentId) => ipcRenderer.invoke('agents:open-editor', { agentId }),
+  updateAgentReviewTarget: (agentId, reviewTargetId) => ipcRenderer.invoke('agents:update-review-target', { agentId, reviewTargetId }),
+  updateLoopConfig: (agentId, loopType, maxRevisionLoops) => ipcRenderer.invoke('agents:update-loop-config', { agentId, loopType, maxRevisionLoops }),
 
   // First Launch
   checkFirstLaunch: () => ipcRenderer.invoke('first-launch:check'),
@@ -25,7 +28,7 @@ contextBridge.exposeInMainWorld('api', {
   pausePipeline: () => ipcRenderer.invoke('pipeline:pause'),
   resumePipeline: () => ipcRenderer.invoke('pipeline:resume'),
   abortPipeline: () => ipcRenderer.invoke('pipeline:abort'),
-  updatePipelineSteps: (steps) => ipcRenderer.invoke('pipeline:update-steps', { steps }),
+  updatePipelineSteps: (steps, projectPath) => ipcRenderer.invoke('pipeline:update-steps', { steps, projectPath }),
   skipAgent: (stepIndex, projectPath) => ipcRenderer.invoke('pipeline:skip-agent', { stepIndex, projectPath }),
   unskipAgent: (stepIndex, projectPath) => ipcRenderer.invoke('pipeline:unskip-agent', { stepIndex, projectPath }),
   killAgent: () => ipcRenderer.invoke('agent:kill'),
@@ -44,6 +47,8 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.invoke('context:agent-output-path', { projectPath, agentFilePath }),
   openAgentOutput: (projectPath, agentFilePath) =>
     ipcRenderer.invoke('context:open-output', { projectPath, agentFilePath }),
+  openAgentFile: (projectPath, agentFilePath) =>
+    ipcRenderer.invoke('context:open-agent-file', { projectPath, agentFilePath }),
 
   // Settings
   getSettings: () => ipcRenderer.invoke('settings:get'),

@@ -308,7 +308,7 @@ async function reassignUuid(filePath, newId) {
  */
 async function getById(id) {
   const all = await list()
-  return all.find(a => a.id === id) || null
+  return all.agents.find(a => a.id === id) || null
 }
 
 /**
@@ -325,4 +325,113 @@ async function usageCount(agentId) {
   ).length
 }
 
-module.exports = { parseAgentFile, create, createBoilerplate, list, getById, usageCount }
+/**
+ * Update the review_target field in an agent's YAML file
+ * @param {string} agentId - Agent ID to update
+ * @param {string|null} reviewTargetId - UUID of the target agent (or null to clear)
+ * @returns {Promise<{ok: boolean, error?: string}>}
+ */
+async function updateReviewTarget(agentId, reviewTargetId) {
+  try {
+    const agent = await getById(agentId)
+    if (!agent) {
+      return { error: 'Agent not found' }
+    }
+
+    const raw = await fs.readFile(agent.filePath, 'utf8')
+    const fmMatch = raw.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n([\s\S]*)$/m)
+    if (!fmMatch) {
+      return { error: 'Agent file missing YAML front matter' }
+    }
+
+    const meta = yaml.load(fmMatch[1])
+    const prompt = fmMatch[2].trim()
+
+    // Update the review_target
+    meta.review_target = reviewTargetId
+
+    // Rebuild front matter with updated review_target
+    const frontMatter = yaml.dump({
+      id: meta.id,
+      name: meta.name,
+      reads: meta.reads || [],
+      review_target: reviewTargetId || null,
+      loop: meta.loop || null,
+      timeout_seconds: meta.timeout_seconds || 300,
+      allowedCommands: meta.allowedCommands || [],
+      excludedCommands: meta.excludedCommands || [],
+    }).trim()
+
+    const hasComment = fmMatch[1].includes('# DO NOT EDIT')
+    const comment = hasComment ? '' : '# DO NOT EDIT — app identifier\n'
+    const content = `---\n${comment}${frontMatter}\n---\n\n${prompt}`
+
+    await fs.writeFile(agent.filePath, content, 'utf8')
+    return { ok: true }
+  } catch (e) {
+    return { error: e.message }
+  }
+}
+
+/**
+ * Update the loop.type and loop.max_revision_loops fields in an agent's YAML file
+ * @param {string} agentId - Agent ID to update
+ * @param {string|null} loopType - "revision", "iteration", or null for "None"
+ * @param {number|null} maxRevisionLoops - Max loops for revision type (optional)
+ * @returns {Promise<{ok: boolean, error?: string}>}
+ */
+async function updateLoopConfig(agentId, loopType, maxRevisionLoops) {
+  try {
+    const agent = await getById(agentId)
+    if (!agent) {
+      return { error: 'Agent not found' }
+    }
+
+    const raw = await fs.readFile(agent.filePath, 'utf8')
+    const fmMatch = raw.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n([\s\S]*)$/m)
+    if (!fmMatch) {
+      return { error: 'Agent file missing YAML front matter' }
+    }
+
+    const meta = yaml.load(fmMatch[1])
+    const prompt = fmMatch[2].trim()
+
+    // Update loop configuration
+    if (loopType === null || loopType === 'None') {
+      // Set loop.type to null but keep the loop object structure
+      meta.loop = { type: null }
+    } else {
+      // Set loop.type to the selected value
+      meta.loop = {
+        type: loopType,
+      }
+      // Only set max_revision_loops for revision type
+      if (loopType === 'revision' && typeof maxRevisionLoops === 'number' && maxRevisionLoops > 0) {
+        meta.loop.max_revision_loops = maxRevisionLoops
+      }
+    }
+
+    // Rebuild front matter with updated loop config
+    const frontMatter = yaml.dump({
+      id: meta.id,
+      name: meta.name,
+      reads: meta.reads || [],
+      review_target: meta.review_target || null,
+      loop: meta.loop || null,
+      timeout_seconds: meta.timeout_seconds || 300,
+      allowedCommands: meta.allowedCommands || [],
+      excludedCommands: meta.excludedCommands || [],
+    }).trim()
+
+    const hasComment = fmMatch[1].includes('# DO NOT EDIT')
+    const comment = hasComment ? '' : '# DO NOT EDIT — app identifier\n'
+    const content = `---\n${comment}${frontMatter}\n---\n\n${prompt}`
+
+    await fs.writeFile(agent.filePath, content, 'utf8')
+    return { ok: true }
+  } catch (e) {
+    return { error: e.message }
+  }
+}
+
+module.exports = { parseAgentFile, create, createBoilerplate, list, getById, usageCount, updateReviewTarget, updateLoopConfig }

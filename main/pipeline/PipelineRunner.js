@@ -662,13 +662,15 @@ class PipelineRunner {
   /**
    * Update pipeline steps (for mid-run modifications)
    * @param {Array} steps - New steps array
+   * @param {string|null} projectPath - Optional project path (uses currentProjectPath if not provided)
    * @returns {Promise<void>}
    */
-  async updateSteps(steps) {
+  async updateSteps(steps, projectPath = null) {
     this.steps = steps
-    if (this.currentProjectPath) {
+    const savePath = projectPath || this.currentProjectPath
+    if (savePath) {
       const ProjectManager = require('../project/ProjectManager')
-      await ProjectManager.updatePipeline(this.currentProjectPath, steps)
+      await ProjectManager.updatePipeline(savePath, steps)
     }
   }
 

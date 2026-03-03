@@ -84,6 +84,10 @@ async function loadInitialData() {
     }
   } catch (e) {
     appendLogLine('Failed to load initial data: ' + e.message, 'error')
+    // Fallback: if no project is open, show welcome dialog so user isn't stuck
+    if (!state.currentProject) {
+      showDialog('dialog-welcome')
+    }
   }
 }
 
@@ -142,8 +146,8 @@ function wireEventListeners() {
 
   // Agent controls
   document.getElementById('btn-continue').addEventListener('click', handleContinue)
-  document.getElementById('btn-edit-output').addEventListener('click', handleEditOutput)
   document.getElementById('btn-kill-agent').addEventListener('click', handleKillAgent)
+  document.getElementById('btn-checkpoint-file').addEventListener('click', handleCheckpointFile)
 
   // Activity log
   document.getElementById('btn-clear-log').addEventListener('click', clearLog)
@@ -188,6 +192,66 @@ function wireEventListeners() {
     }
   })
 
+  // Reviewer Status dropdown change handler
+  document.getElementById('detail-reviewer-status').addEventListener('change', async (e) => {
+    const agent = getSelectedAgent()
+    if (!agent) return
+
+    const loopType = e.target.value === 'none' ? null : e.target.value
+    // Get max loops from agent's current state, not from potentially stale input
+    const existingMaxLoops = agent.loop?.max_revision_loops || 5
+    const maxRevisionLoops = loopType === 'revision' ? existingMaxLoops : null
+
+    try {
+      const result = await window.api.updateLoopConfig(agent.id, loopType, maxRevisionLoops)
+      if (result.error) {
+        appendLogLine('Failed to update loop config: ' + result.error, 'error')
+        return
+      }
+      // Update local state
+      agent.loop = loopType ? { type: loopType, max_revision_loops: maxRevisionLoops } : { type: null }
+      // Update UI visibility based on new selection
+      updateLoopConfigUI(agent)
+      appendLogLine(`Updated ${agent.name} reviewer status to ${e.target.value}`, 'info')
+    } catch (e) {
+      appendLogLine('Failed to update loop config: ' + e.message, 'error')
+    }
+  })
+
+  // Max Loops Count input change handler
+  document.getElementById('detail-max-loops-input').addEventListener('change', async (e) => {
+    const agent = getSelectedAgent()
+    if (!agent) return
+
+    const loopTypeSelect = document.getElementById('detail-reviewer-status')
+    const loopType = loopTypeSelect.value === 'none' ? null : loopTypeSelect.value
+
+    // Only update if loop type is revision
+    if (loopType !== 'revision') return
+
+    const maxRevisionLoops = parseInt(e.target.value, 10)
+    if (isNaN(maxRevisionLoops) || maxRevisionLoops < 1) {
+      appendLogLine('Max loops must be at least 1', 'error')
+      e.target.value = agent.loop?.max_revision_loops || 5
+      return
+    }
+
+    try {
+      const result = await window.api.updateLoopConfig(agent.id, loopType, maxRevisionLoops)
+      if (result.error) {
+        appendLogLine('Failed to update max loops: ' + result.error, 'error')
+        return
+      }
+      // Update local state
+      if (!agent.loop) agent.loop = {}
+      agent.loop.type = loopType
+      agent.loop.max_revision_loops = maxRevisionLoops
+      appendLogLine(`Updated ${agent.name} max loops to ${maxRevisionLoops}`, 'info')
+    } catch (e) {
+      appendLogLine('Failed to update max loops: ' + e.message, 'error')
+    }
+  })
+
   // Welcome dialog
   document.getElementById('btn-welcome-new').addEventListener('click', () => {
     hideDialog('dialog-welcome')
@@ -225,6 +289,9 @@ function wireEventListeners() {
     openNewProjectDialog()
   })
 
+  // Context menu
+  setupContextMenu()
+
   // Keyboard shortcuts
   document.addEventListener('keydown', async (e) => {
     const isCtrl = e.ctrlKey || e.metaKey
@@ -234,7 +301,8 @@ function wireEventListeners() {
     const tag = e.target.tagName.toLowerCase()
     if (tag === 'input' || tag === 'textarea' || e.target.isContentEditable) return
 
-    if (e.key === 'n') {
+    const key = e.key.toLowerCase()
+    if (key === 'n') {
       e.preventDefault()
       // Check if pipeline is active
       if (state.pipelineState === 'running' || state.pipelineState === 'paused') {
@@ -242,7 +310,7 @@ function wireEventListeners() {
         return
       }
       openNewProjectDialog()
-    } else if (e.key === 'o') {
+    } else if (key === 'o') {
       e.preventDefault()
       // Check if pipeline is active
       if (state.pipelineState === 'running' || state.pipelineState === 'paused') {
@@ -252,6 +320,477 @@ function wireEventListeners() {
       await openProjectDialog()
     }
   })
+
+  // Global click to hide context menu and cancel selection mode
+  document.addEventListener('click', (e) => {
+    hideContextMenu()
+    // Cancel selection mode if clicking outside an eligible agent
+    // But NOT if clicking inside a dialog (to allow confirmation dialogs to work)
+    if (selectionModeState) {
+      const isEligibleAgent = e.target.closest('.eligible-target')
+      const isInsideDialog = e.target.closest('.dialog')
+      if (!isEligibleAgent && !isInsideDialog) {
+        cancelSelectionMode()
+      }
+    }
+  })
+
+  // Escape key to cancel selection mode
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && selectionModeState) {
+      e.preventDefault()
+      cancelSelectionMode()
+    }
+  })
+}
+
+// ─── Context Menu ───────────────────────────────────────────────────────────
+
+let contextMenuTarget = null // { agentId, agentName, index, source: 'pipeline' | 'library' }
+
+// Selection mode state for assigning review target
+let selectionModeState = null // { reviewerAgentId, reviewerAgentName, reviewerHasTarget: boolean } | null
+
+function setupContextMenu() {
+  const menu = document.getElementById('agent-context-menu')
+  const menuItems = menu.querySelectorAll('.context-menu-item')
+
+  menuItems.forEach(item => {
+    item.addEventListener('click', (e) => {
+      e.stopPropagation()
+      const action = item.dataset.action
+      handleContextMenuAction(action)
+      hideContextMenu()
+    })
+  })
+}
+
+function showContextMenu(e, agentId, agentName, index, source) {
+  e.preventDefault()
+  e.stopPropagation()
+
+  contextMenuTarget = { agentId, agentName, index, source }
+
+  const menu = document.getElementById('agent-context-menu')
+  const assignTargetItem = menu.querySelector('[data-action="assign-review-target"]')
+
+  // Determine if "Assign a Review Target" should be shown
+  let showAssignTarget = false
+
+  // Only show if:
+  // 1. Agent has loop.type set to a real value (not null, empty, or placeholder)
+  // 2. Pipeline is NOT running and NOT error (allowed: idle, paused, complete, aborted)
+  const validPipelineStates = ['idle', 'paused', 'complete', 'aborted']
+  const isPipelineValid = validPipelineStates.includes(state.pipelineState)
+
+  if (agentId && isPipelineValid) {
+    const agent = state.agents.find(a => a.id === agentId)
+    if (agent && agent.loop && agent.loop.type && agent.loop.type !== '<value>') {
+      showAssignTarget = true
+    }
+  }
+
+  // Show/hide the menu item
+  if (assignTargetItem) {
+    assignTargetItem.style.display = showAssignTarget ? 'block' : 'none'
+  }
+
+  menu.classList.remove('hidden')
+
+  // Position menu at cursor location
+  const x = e.clientX
+  const y = e.clientY
+
+  // Ensure menu stays within viewport
+  const rect = menu.getBoundingClientRect()
+  const viewportWidth = window.innerWidth
+  const viewportHeight = window.innerHeight
+
+  let finalX = x
+  let finalY = y
+
+  if (x + rect.width > viewportWidth) {
+    finalX = viewportWidth - rect.width - 5
+  }
+  if (y + rect.height > viewportHeight) {
+    finalY = viewportHeight - rect.height - 5
+  }
+
+  menu.style.left = finalX + 'px'
+  menu.style.top = finalY + 'px'
+}
+
+function hideContextMenu() {
+  const menu = document.getElementById('agent-context-menu')
+  menu.classList.add('hidden')
+  contextMenuTarget = null
+}
+
+function handleContextMenuAction(action) {
+  if (!contextMenuTarget) return
+
+  const { agentId, agentName, source } = contextMenuTarget
+
+  switch (action) {
+    case 'assign-review-target':
+      handleAssignReviewTarget(agentId, agentName)
+      break
+    case 'remove-agent':
+      appendLogLine(`Feature not implemented yet: Remove Agent "${agentName}"`, 'info')
+      break
+    case 'edit-agent':
+      appendLogLine(`Feature not implemented yet: Edit Agent "${agentName}"`, 'info')
+      break
+    case 'skip-agent':
+      appendLogLine(`Feature not implemented yet: Skip Agent "${agentName}"`, 'info')
+      break
+    case 'edit-output':
+      appendLogLine(`Feature not implemented yet: Edit Output for "${agentName}"`, 'info')
+      break
+    case 'kill-agent':
+      appendLogLine(`Feature not implemented yet: Kill Agent "${agentName}"`, 'info')
+      break
+  }
+}
+
+function attachContextMenuListener(element) {
+  element.addEventListener('contextmenu', (e) => {
+    const agentId = element.dataset.agentId
+    let agentName = 'Unknown'
+    let index = -1
+    let source = 'library'
+
+    // Check if this is a pipeline agent item
+    if (agentId) {
+      agentName = element.querySelector('.agent-name')?.textContent || 'Unknown'
+      index = parseInt(element.dataset.index, 10)
+      source = 'pipeline'
+    } else {
+      // Library agent
+      const nameEl = element.querySelector('.library-agent-name')
+      if (nameEl) agentName = nameEl.textContent
+    }
+
+    showContextMenu(e, agentId, agentName, index, source)
+  })
+}
+
+// ─── Assign Review Target Selection Mode ────────────────────────────────────
+
+/**
+ * Start the process of assigning a review target to a reviewer agent
+ * @param {string} reviewerAgentId - ID of the agent that was right-clicked
+ * @param {string} reviewerAgentName - Name of the reviewer agent
+ */
+async function handleAssignReviewTarget(reviewerAgentId, reviewerAgentName) {
+  try {
+    // Get the reviewer agent to check if it already has a review_target
+    const reviewerAgent = state.agents.find(a => a.id === reviewerAgentId)
+    if (!reviewerAgent) {
+      appendLogLine('Reviewer agent not found', 'error')
+      return
+    }
+
+    const hasExistingTarget = !!reviewerAgent.review_target
+
+    // If agent already has a review_target, show confirmation dialog
+    if (hasExistingTarget) {
+      showDialog('dialog-review-target-replace')
+
+      // Get buttons and remove old listeners by cloning
+      const okBtn = document.getElementById('btn-review-target-ok')
+      const cancelBtn = document.getElementById('btn-review-target-cancel')
+      const newOkBtn = okBtn.cloneNode(true)
+      const newCancelBtn = cancelBtn.cloneNode(true)
+      okBtn.parentNode.replaceChild(newOkBtn, okBtn)
+      cancelBtn.parentNode.replaceChild(newCancelBtn, cancelBtn)
+
+      // Wait for user response
+      const confirmed = await new Promise((resolve) => {
+        const onOk = () => {
+          hideDialog('dialog-review-target-replace')
+          resolve(true)
+        }
+
+        const onCancel = () => {
+          hideDialog('dialog-review-target-replace')
+          resolve(false)
+        }
+
+        newOkBtn.addEventListener('click', onOk)
+        newCancelBtn.addEventListener('click', onCancel)
+      })
+
+      if (!confirmed) {
+        appendLogLine('Review target assignment canceled by user', 'info')
+        return
+      }
+    }
+
+    // Enter selection mode
+    selectionModeState = {
+      reviewerAgentId,
+      reviewerAgentName,
+      reviewerHasTarget: hasExistingTarget,
+    }
+
+    // Highlight all eligible agents (all except the reviewer)
+    highlightEligibleAgents(reviewerAgentId)
+
+    appendLogLine(`Select a target agent for "${reviewerAgentName}" to review. Click outside an agent to cancel.`, 'info')
+  } catch (e) {
+    appendLogLine('Failed to start review target assignment: ' + e.message, 'error')
+  }
+}
+
+/**
+ * Highlight all eligible target agents (all except the reviewer)
+ * @param {string} reviewerAgentId - ID of the reviewer agent to exclude
+ */
+function highlightEligibleAgents(reviewerAgentId) {
+  // Add eligible-target class to pipeline agent items except the reviewer
+  document.querySelectorAll('#pipeline-agents-list .agent-item').forEach((item) => {
+    const itemId = item.dataset.agentId
+    if (itemId !== reviewerAgentId) {
+      item.classList.add('eligible-target')
+    }
+  })
+
+  // Do NOT highlight library agents - only pipeline agents are eligible targets
+
+  document.querySelectorAll('.pipeline-node').forEach((node) => {
+    const nodeId = node.dataset.agentId
+    if (nodeId !== reviewerAgentId) {
+      node.classList.add('eligible-target')
+    }
+  })
+
+  // Add click handlers to eligible agents
+  document.querySelectorAll('.eligible-target').forEach((el) => {
+    el.addEventListener('click', handleEligibleAgentClick, { once: true })
+  })
+}
+
+/**
+ * Handle click on an eligible target agent
+ * @param {Event} e - Click event
+ */
+async function handleEligibleAgentClick(e) {
+  e.preventDefault()
+  e.stopPropagation()
+
+  if (!selectionModeState) return
+
+  const { reviewerAgentId, reviewerAgentName } = selectionModeState
+
+  // Find the clicked agent's ID
+  let targetAgentId = null
+  let targetAgentName = null
+
+  // Check if clicked element is a pipeline agent item
+  const pipelineItem = e.target.closest('.agent-item')
+  if (pipelineItem) {
+    targetAgentId = pipelineItem.dataset.agentId
+    targetAgentName = pipelineItem.querySelector('.agent-name')?.textContent || 'Unknown'
+  }
+
+  // Check if clicked element is a pipeline node
+  const pipelineNode = e.target.closest('.pipeline-node')
+  if (pipelineNode && !targetAgentId) {
+    targetAgentId = pipelineNode.dataset.agentId
+    const agent = state.agents.find(a => a.id === targetAgentId)
+    if (agent) targetAgentName = agent.name
+  }
+
+  if (!targetAgentId) {
+    appendLogLine('Could not determine target agent', 'error')
+    exitSelectionMode()
+    return
+  }
+
+  // Check if user clicked the same agent (self-review)
+  if (targetAgentId === reviewerAgentId) {
+    exitSelectionMode()
+    showDialog('dialog-self-review-error')
+    // Wait for user to acknowledge
+    const okBtn = document.getElementById('btn-self-review-ok')
+    const cleanup = () => okBtn.removeEventListener('click', onOk)
+    const onOk = () => {
+      cleanup()
+      hideDialog('dialog-self-review-error')
+    }
+    okBtn.addEventListener('click', onOk)
+    return
+  }
+
+  // Check if target agent is already assigned to a different reviewer
+  const existingReviewer = state.agents.find(a => a.review_target === targetAgentId && a.id !== reviewerAgentId)
+  if (existingReviewer) {
+    // Show dialog warning about disconnecting existing reviewer
+    exitSelectionMode()
+    document.getElementById('target-existing-reviewer-name').textContent = existingReviewer.name
+    showDialog('dialog-target-already-assigned')
+
+    // Wait for user response
+    const confirmed = await new Promise((resolve) => {
+      const continueBtn = document.getElementById('btn-target-assigned-continue')
+      const cancelBtn = document.getElementById('btn-target-assigned-cancel')
+
+      // Clone buttons to remove old listeners
+      const newContinueBtn = continueBtn.cloneNode(true)
+      const newCancelBtn = cancelBtn.cloneNode(true)
+      continueBtn.parentNode.replaceChild(newContinueBtn, continueBtn)
+      cancelBtn.parentNode.replaceChild(newCancelBtn, cancelBtn)
+
+      const onContinue = () => {
+        hideDialog('dialog-target-already-assigned')
+        resolve(true)
+      }
+
+      const onCancel = () => {
+        hideDialog('dialog-target-already-assigned')
+        resolve(false)
+      }
+
+      newContinueBtn.addEventListener('click', onContinue)
+      newCancelBtn.addEventListener('click', onCancel)
+    })
+
+    if (!confirmed) {
+      appendLogLine('Review target assignment canceled by user', 'info')
+      return
+    }
+
+    // User confirmed - proceed with assignment and disconnect existing reviewer
+    await assignReviewTarget(reviewerAgentId, reviewerAgentName, targetAgentId, targetAgentName, existingReviewer.id)
+    return
+  }
+
+  // Proceed with assigning the review target
+  await assignReviewTarget(reviewerAgentId, reviewerAgentName, targetAgentId, targetAgentName)
+}
+
+/**
+ * Assign a review target to a reviewer agent
+ * @param {string} reviewerAgentId - ID of the reviewer agent
+ * @param {string} reviewerAgentName - Name of the reviewer agent
+ * @param {string} targetAgentId - ID of the target agent
+ * @param {string} targetAgentName - Name of the target agent
+ * @param {string|null} existingReviewerId - ID of existing reviewer to disconnect (if any)
+ */
+async function assignReviewTarget(reviewerAgentId, reviewerAgentName, targetAgentId, targetAgentName, existingReviewerId = null) {
+  try {
+    // If there's an existing reviewer, disconnect them first
+    if (existingReviewerId) {
+      const disconnectResult = await window.api.updateAgentReviewTarget(existingReviewerId, null)
+      if (disconnectResult.error) {
+        appendLogLine('Failed to disconnect existing reviewer: ' + disconnectResult.error, 'error')
+        return
+      }
+      appendLogLine(`Disconnected existing reviewer from "${targetAgentName}"`, 'info')
+
+      // Update local state
+      const existingReviewer = state.agents.find(a => a.id === existingReviewerId)
+      if (existingReviewer) {
+        existingReviewer.review_target = null
+      }
+    }
+
+    // Update the reviewer agent's YAML file with the target's UUID
+    const result = await window.api.updateAgentReviewTarget(reviewerAgentId, targetAgentId)
+    if (result.error) {
+      appendLogLine('Failed to update review target: ' + result.error, 'error')
+      return
+    }
+
+    appendLogLine(`Assigned "${targetAgentName}" as review target for "${reviewerAgentName}"`, 'ok')
+
+    // Update local state
+    const reviewerAgent = state.agents.find(a => a.id === reviewerAgentId)
+    if (reviewerAgent) {
+      reviewerAgent.review_target = targetAgentId
+    }
+
+    // Reorder agents: move reviewer agent to be right after target agent
+    await reorderAgentsAfterTarget(targetAgentId, reviewerAgentId)
+
+    // Refresh agents list to reflect YAML changes
+    const agentResult = await window.api.listAgents()
+    state.agents = agentResult?.agents || []
+
+    // Re-render UI
+    renderPipelineAgents()
+    renderLibraryAgents()
+    renderPipelineCanvas()
+
+    // Exit selection mode after successful assignment
+    exitSelectionMode()
+  } catch (e) {
+    appendLogLine('Failed to assign review target: ' + e.message, 'error')
+  }
+}
+
+/**
+ * Reorder agents so the reviewer agent is right after the target agent
+ * @param {string} targetAgentId - ID of the target agent
+ * @param {string} reviewerAgentId - ID of the reviewer agent to move
+ */
+async function reorderAgentsAfterTarget(targetAgentId, reviewerAgentId) {
+  // Find current indices
+  const targetIndex = state.pipelineSteps.findIndex(s => s.agent_id === targetAgentId)
+  const reviewerIndex = state.pipelineSteps.findIndex(s => s.agent_id === reviewerAgentId)
+
+  if (targetIndex === -1 || reviewerIndex === -1) {
+    appendLogLine('Could not find agents for reordering', 'error')
+    return
+  }
+
+  // Don't reorder if reviewer is already right after target
+  if (reviewerIndex === targetIndex + 1) {
+    return
+  }
+
+  // Remove reviewer from current position
+  const [reviewerStep] = state.pipelineSteps.splice(reviewerIndex, 1)
+
+  // If reviewer was before target, targetIndex shifted down by 1
+  const adjustedTargetIndex = reviewerIndex < targetIndex ? targetIndex - 1 : targetIndex
+
+  // Insert reviewer right after target
+  const newIndex = adjustedTargetIndex + 1
+  state.pipelineSteps.splice(newIndex, 0, reviewerStep)
+
+  // Save updated pipeline to project JSON
+  if (state.currentProject) {
+    try {
+      await window.api.updatePipelineSteps(state.pipelineSteps, state.currentProject.projectPath)
+      appendLogLine(`Reordered pipeline: "${reviewerStep.agent_name}" moved to position ${newIndex + 1}`, 'info')
+    } catch (e) {
+      appendLogLine('Failed to save pipeline order: ' + e.message, 'error')
+    }
+  }
+}
+
+/**
+ * Exit selection mode and clean up highlighting
+ */
+function exitSelectionMode() {
+  // Remove eligible-target class from all elements
+  document.querySelectorAll('.eligible-target').forEach((el) => {
+    el.classList.remove('eligible-target')
+  })
+
+  selectionModeState = null
+}
+
+/**
+ * Cancel selection mode (called when clicking outside agents or pressing Escape)
+ */
+function cancelSelectionMode() {
+  if (selectionModeState) {
+    appendLogLine('Review target assignment canceled', 'info')
+  }
+  exitSelectionMode()
 }
 
 // ─── Pipeline Status Handler ────────────────────────────────────────────────
@@ -759,6 +1298,7 @@ function renderPipelineAgents() {
     `
 
     item.addEventListener('click', () => selectAgent(index))
+    attachContextMenuListener(item)
     attachDragEvents(item)
     list.appendChild(item)
   })
@@ -832,6 +1372,7 @@ function renderLibraryAgents() {
 
     const item = document.createElement('div')
     item.className = 'library-agent'
+    item.dataset.agentId = agent.id
     if (agent.id === state.selectedLibraryAgentId) {
       item.classList.add('selected')
     }
@@ -841,6 +1382,7 @@ function renderLibraryAgents() {
       <div class="library-agent-usage">—</div>
     `
     item.addEventListener('click', () => selectLibraryAgent(agent))
+    attachContextMenuListener(item)
     list.appendChild(item)
   })
 }
@@ -912,6 +1454,7 @@ function renderPipelineCanvas() {
       e.stopPropagation() // Prevent canvas click from firing
       selectAgent(index)
     })
+    attachContextMenuListener(node)
     canvas.appendChild(node)
 
     // Add connector if not last
@@ -997,6 +1540,63 @@ function deselectAgent() {
   setPipelineControlsDisabled(state.pipelineSteps.length === 0)
 }
 
+/**
+ * Get the currently selected agent (from library or pipeline)
+ * @returns {Object|null}
+ */
+function getSelectedAgent() {
+  // First check if a library agent is selected
+  if (state.selectedLibraryAgentId) {
+    return state.agents.find(a => a.id === state.selectedLibraryAgentId) || null
+  }
+  // Then check if a pipeline agent is selected
+  if (state.selectedNodeIndex >= 0 && state.pipelineSteps[state.selectedNodeIndex]) {
+    return state.agents.find(a => a.id === state.pipelineSteps[state.selectedNodeIndex].agent_id) || null
+  }
+  return null
+}
+
+/**
+ * Update UI visibility for loop config fields based on agent's loop type
+ * @param {Object} agent - Agent object
+ */
+function updateLoopConfigUI(agent) {
+  const loopTypeSelect = document.getElementById('detail-reviewer-status')
+  const maxLoopsLabel = document.getElementById('detail-max-loops-label')
+  const maxLoopsVal = document.getElementById('detail-max-loops-val')
+  const maxLoopsInput = document.getElementById('detail-max-loops-input')
+  const targetLabel = document.getElementById('detail-target-label')
+  const targetVal = document.getElementById('detail-target')
+
+  // Determine current loop type
+  const loopType = agent.loop && agent.loop.type && agent.loop.type !== '<value>' ? agent.loop.type : null
+
+  // Set dropdown value
+  loopTypeSelect.value = loopType || 'none'
+
+  // Show/hide Max Loops Count (only for revision type)
+  if (loopType === 'revision') {
+    maxLoopsLabel.classList.remove('hidden')
+    maxLoopsVal.classList.remove('hidden')
+    maxLoopsInput.value = agent.loop?.max_revision_loops || 5
+  } else {
+    maxLoopsLabel.classList.add('hidden')
+    maxLoopsVal.classList.add('hidden')
+  }
+
+  // Show/hide Target field (only when loop type is not null)
+  if (loopType && agent.review_target) {
+    targetLabel.classList.remove('hidden')
+    targetVal.classList.remove('hidden')
+    const targetAgent = state.agents.find(a => a.id === agent.review_target)
+    targetVal.textContent = targetAgent ? targetAgent.name : agent.review_target
+  } else {
+    targetLabel.classList.add('hidden')
+    targetVal.classList.add('hidden')
+    targetVal.textContent = '—'
+  }
+}
+
 function selectLibraryAgent(agent) {
   // Clear pipeline selection
   state.selectedNodeIndex = -1
@@ -1027,11 +1627,13 @@ async function updateDetailPanel(libraryAgent = null) {
     if (agent) {
       document.getElementById('detail-agent-name').textContent = agent.name
       document.getElementById('detail-status').textContent = 'Not in pipeline'
+      document.getElementById('detail-uuid').textContent = agent.id || '—'
       document.getElementById('detail-elapsed').textContent = '—'
       document.getElementById('detail-timeout').textContent = agent ? `${agent.timeout_seconds}s` : '—'
       document.getElementById('detail-reads').textContent = agent?.reads?.length ? `${agent.reads.length} files` : 'None'
-      document.getElementById('detail-output').textContent = '—'
-      document.getElementById('agent-output').innerHTML = '<div class="output-placeholder">Library agents have no output until added to a pipeline</div>'
+
+      // Update Reviewer Status dropdown and related fields
+      updateLoopConfigUI(agent)
 
       // Hide progress bar for library agents
       document.getElementById('progress-fill').style.width = '0%'
@@ -1045,10 +1647,23 @@ async function updateDetailPanel(libraryAgent = null) {
   if (index === -1 || !state.pipelineSteps[index]) {
     document.getElementById('detail-agent-name').textContent = 'No agent selected'
     document.getElementById('detail-status').textContent = '—'
+    document.getElementById('detail-uuid').textContent = '—'
     document.getElementById('detail-elapsed').textContent = '—'
     document.getElementById('detail-timeout').textContent = '—'
     document.getElementById('detail-reads').textContent = '—'
-    document.getElementById('detail-output').textContent = '—'
+
+    // Reset dropdown to None
+    document.getElementById('detail-reviewer-status').value = 'none'
+
+    // Hide target field
+    document.getElementById('detail-target-label').classList.add('hidden')
+    document.getElementById('detail-target').classList.add('hidden')
+    document.getElementById('detail-target').textContent = '—'
+
+    // Hide max loops field
+    document.getElementById('detail-max-loops-label').classList.add('hidden')
+    document.getElementById('detail-max-loops-val').classList.add('hidden')
+
     document.getElementById('agent-output').innerHTML = '<div class="output-placeholder">Select an agent to view output</div>'
     return
   }
@@ -1057,33 +1672,21 @@ async function updateDetailPanel(libraryAgent = null) {
   const agent = state.agents.find(a => a.id === step.agent_id)
 
   document.getElementById('detail-agent-name').textContent = agent?.name || step.agent_name || 'Unknown'
-  
+
   // Check for skipped status
   const isSkipped = step.status === 'skipped'
   document.getElementById('detail-status').textContent = isSkipped ? 'Skipped' :
                                                          index < state.currentStepIndex ? 'Complete' :
                                                          index === state.currentStepIndex ? state.pipelineState : 'Idle'
+
+  // UUID
+  document.getElementById('detail-uuid').textContent = agent?.id || '—'
+
+  // Update Reviewer Status dropdown and related fields
+  updateLoopConfigUI(agent)
+
   document.getElementById('detail-timeout').textContent = agent ? `${agent.timeout_seconds}s` : '—'
   document.getElementById('detail-reads').textContent = agent?.reads?.length ? `${agent.reads.length} files` : 'None'
-
-  // Load output file
-  if (state.currentProject && agent) {
-    try {
-      const outputPath = await window.api.getAgentOutputPath(state.currentProject.projectPath, agent.filePath)
-      const content = await window.api.readContextFile(outputPath)
-      // Store true if file exists (even if empty), false if file doesn't exist
-      state.agentOutputs.set(step.agent_id, content !== undefined && content !== null)
-      document.getElementById('agent-output').textContent = content || '(No output yet)'
-      document.getElementById('detail-output').textContent = content ? `${(content.length / 1024).toFixed(1)} KB` : '—'
-      updateAgentControls()
-    } catch (e) {
-      // File doesn't exist
-      state.agentOutputs.set(step.agent_id, false)
-      document.getElementById('agent-output').textContent = '(File not found)'
-      document.getElementById('detail-output').textContent = '—'
-      updateAgentControls()
-    }
-  }
 
   // Update progress bar
   const total = state.pipelineSteps.length
@@ -1153,27 +1756,36 @@ function updateAgentControls() {
   const editOutputBtn = document.getElementById('btn-edit-output')
 
   // Continue only when paused at transition
-  continueBtn.classList.toggle('hidden', state.pipelineState !== 'paused')
+  if (continueBtn) {
+    continueBtn.classList.toggle('hidden', state.pipelineState !== 'paused')
+  }
 
   // Kill button visible only when pipeline is running AND an agent is selected
-  const isRunning = state.pipelineState === 'running'
-  const hasSelection = state.selectedNodeIndex !== -1
-  killBtn.classList.toggle('hidden', !isRunning || !hasSelection)
+  if (killBtn) {
+    const isRunning = state.pipelineState === 'running'
+    const hasSelection = state.selectedNodeIndex !== -1
+    killBtn.classList.toggle('hidden', !isRunning || !hasSelection)
+  }
 
   // Edit output: hidden when no agent selected, disabled when pipeline running
-  const selectedAgentId = state.pipelineSteps[state.selectedNodeIndex]?.agent_id
-  const hasOutput = state.agentOutputs.get(selectedAgentId)
-  if (!hasSelection) {
-    // No agent selected: hide the button
-    editOutputBtn.classList.add('hidden')
-  } else if (isRunning) {
-    // Agent selected but pipeline running: show but disable
-    editOutputBtn.classList.remove('hidden')
-    editOutputBtn.disabled = true
-  } else {
-    // Agent selected and pipeline not running: show and enable if there's output
-    editOutputBtn.classList.remove('hidden')
-    editOutputBtn.disabled = !hasOutput
+  if (editOutputBtn) {
+    const selectedAgentId = state.pipelineSteps[state.selectedNodeIndex]?.agent_id
+    const hasOutput = state.agentOutputs.get(selectedAgentId)
+    const hasSelection = state.selectedNodeIndex !== -1
+    const isRunning = state.pipelineState === 'running'
+    
+    if (!hasSelection) {
+      // No agent selected: hide the button
+      editOutputBtn.classList.add('hidden')
+    } else if (isRunning) {
+      // Agent selected but pipeline running: show but disable
+      editOutputBtn.classList.remove('hidden')
+      editOutputBtn.disabled = true
+    } else {
+      // Agent selected and pipeline not running: show and enable if there's output
+      editOutputBtn.classList.remove('hidden')
+      editOutputBtn.disabled = !hasOutput
+    }
   }
 }
 
@@ -1269,6 +1881,37 @@ async function handleEditOutput() {
     }
   } catch (e) {
     appendLogLine('Failed to open output file: ' + e.message, 'error')
+  }
+}
+
+async function handleCheckpointFile() {
+  try {
+    if (!state.currentProject) {
+      appendLogLine('No project open', 'warn')
+      return
+    }
+
+    // Determine which agent is selected (library or pipeline)
+    let agent = null
+
+    if (state.selectedLibraryAgentId) {
+      agent = state.agents.find(a => a.id === state.selectedLibraryAgentId)
+    } else if (state.selectedNodeIndex !== -1 && state.pipelineSteps[state.selectedNodeIndex]) {
+      const step = state.pipelineSteps[state.selectedNodeIndex]
+      agent = state.agents.find(a => a.id === step.agent_id)
+    }
+
+    if (!agent || !agent.filePath) {
+      appendLogLine('No agent selected', 'warn')
+      return
+    }
+
+    const result = await window.api.openAgentFile(state.currentProject.projectPath, agent.filePath)
+    if (result.exists === false) {
+      appendLogLine('Agent context file not found in project Context folder', 'warn')
+    }
+  } catch (e) {
+    appendLogLine('Failed to open agent file: ' + e.message, 'error')
   }
 }
 
@@ -1835,7 +2478,7 @@ async function addAgentToPipeline(agent) {
     state.pipelineSteps.push(newStep)
 
     // Save updated pipeline
-    await window.api.updatePipelineSteps(state.pipelineSteps)
+    await window.api.updatePipelineSteps(state.pipelineSteps, state.currentProject.projectPath)
 
     hideDialog('dialog-add-agent')
     appendLogLine(`Added "${agent.name}" to pipeline`, 'ok')
@@ -1868,7 +2511,7 @@ async function handleRemoveAgent() {
     state.pipelineSteps.splice(indexToRemove, 1)
 
     // Save updated pipeline
-    await window.api.updatePipelineSteps(state.pipelineSteps)
+    await window.api.updatePipelineSteps(state.pipelineSteps, state.currentProject.projectPath)
 
     appendLogLine(`Removed "${agentName}" from pipeline`, 'ok')
 
@@ -2008,7 +2651,7 @@ function attachDragEvents(item) {
       renderPipelineCanvas()
 
       // Save updated pipeline
-      window.api.updatePipelineSteps(state.pipelineSteps).catch((e) => {
+      window.api.updatePipelineSteps(state.pipelineSteps, state.currentProject.projectPath).catch((e) => {
         appendLogLine('Failed to save pipeline order: ' + e.message, 'error')
       })
 

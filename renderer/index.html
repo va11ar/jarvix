@@ -104,14 +104,30 @@
           <div class="meta-grid">
             <div class="meta-key">Status</div>
             <div class="meta-val" id="detail-status">—</div>
+            <div class="meta-key">UUID</div>
+            <div class="meta-val" id="detail-uuid">—</div>
+          </div>
+          <div class="reviewer-status-section">
+            <div class="reviewer-status-label">Reviewer Status</div>
+            <select id="detail-reviewer-status" class="reviewer-status-select">
+              <option value="none">None</option>
+              <option value="revision">Revision</option>
+              <option value="iteration">Iteration</option>
+            </select>
+          </div>
+          <div class="meta-grid" style="margin-top: 8px;">
+            <div class="meta-key hidden" id="detail-max-loops-label">Max Loops Count</div>
+            <div class="meta-val hidden" id="detail-max-loops-val">
+              <input type="number" id="detail-max-loops-input" class="max-loops-input" min="1" value="5">
+            </div>
+            <div class="meta-key hidden" id="detail-target-label">Target</div>
+            <div class="meta-val hidden" id="detail-target">—</div>
             <div class="meta-key">Elapsed</div>
             <div class="meta-val" id="detail-elapsed">—</div>
             <div class="meta-key">Timeout</div>
             <div class="meta-val" id="detail-timeout">—</div>
             <div class="meta-key">Reads</div>
             <div class="meta-val" id="detail-reads">—</div>
-            <div class="meta-key">Output</div>
-            <div class="meta-val" id="detail-output">—</div>
           </div>
         </div>
 
@@ -135,9 +151,7 @@
 
         <div id="agent-controls">
           <button class="agent-btn primary hidden" id="btn-continue">Continue</button>
-          <div class="pipe-btn-wrap" data-tip="The pipeline must not be running to edit output">
-            <button class="agent-btn hidden" id="btn-edit-output" disabled>Edit Context File</button>
-          </div>
+          <button class="agent-btn" id="btn-checkpoint-file">Checkpoint file</button>
           <button class="pipe-btn danger" id="btn-kill-agent">Kill Agent</button>
         </div>
       </div>
@@ -467,6 +481,69 @@
         <button class="footer-btn primary" id="btn-qwen-browse">Browse to installation</button>
       </div>
     </div>
+  </div>
+
+  <!-- Review Target Replacement Confirmation Dialog -->
+  <div class="overlay hidden" id="dialog-review-target-replace">
+    <div class="dialog" style="width:420px;">
+      <div class="dialog-header">
+        <div class="dialog-title">Review Target Already Assigned</div>
+      </div>
+      <div class="dialog-body" style="padding:16px;">
+        <p style="color:var(--text-dim);margin-bottom:12px;">
+          The agent you are assigning an agent to has a target already, this will replace the currently assigned agent.
+        </p>
+      </div>
+      <div class="dialog-footer">
+        <button class="footer-btn" id="btn-review-target-cancel">Cancel</button>
+        <button class="footer-btn primary" id="btn-review-target-ok">OK</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Self Review Error Dialog -->
+  <div class="overlay hidden" id="dialog-self-review-error">
+    <div class="dialog" style="width:420px;">
+      <div class="dialog-header">
+        <div class="dialog-title">Cannot Assign Self</div>
+      </div>
+      <div class="dialog-body" style="padding:16px;">
+        <p style="color:var(--text-dim);margin-bottom:12px;">
+          You can not assign an agent to review itself.
+        </p>
+      </div>
+      <div class="dialog-footer">
+        <button class="footer-btn primary" id="btn-self-review-ok">OK</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Review Target Already Assigned Dialog -->
+  <div class="overlay hidden" id="dialog-target-already-assigned">
+    <div class="dialog" style="width:480px;">
+      <div class="dialog-header">
+        <div class="dialog-title">Target Already Assigned</div>
+      </div>
+      <div class="dialog-body" style="padding:16px;">
+        <p style="color:var(--text-dim);margin-bottom:12px;">
+          The target agent you chose is already assigned as a target to a different reviewer <span id="target-existing-reviewer-name" style="color:var(--text);font-weight:500;"></span>. If you continue assigning this agent to the reviewer you selected, however that will disconnect the current reviewer assigned to the agent you selected. Do you want to continue?
+        </p>
+      </div>
+      <div class="dialog-footer">
+        <button class="footer-btn" id="btn-target-assigned-cancel">Cancel</button>
+        <button class="footer-btn primary" id="btn-target-assigned-continue">Continue</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Agent Context Menu -->
+  <div class="context-menu hidden" id="agent-context-menu">
+    <div class="context-menu-item" data-action="assign-review-target">Assign a review Target</div>
+    <div class="context-menu-item" data-action="remove-agent">Remove Agent</div>
+    <div class="context-menu-item" data-action="edit-agent">Edit Agent</div>
+    <div class="context-menu-item" data-action="skip-agent">Skip Agent</div>
+    <div class="context-menu-item" data-action="edit-output">Edit Output</div>
+    <div class="context-menu-item" data-action="kill-agent">Kill Agent</div>
   </div>
 
   <script src="renderer.js"></script>

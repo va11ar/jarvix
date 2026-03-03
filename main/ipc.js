@@ -37,6 +37,9 @@ function registerIpcHandlers(win) {
   ipcMain.handle('agents:get',        h((agentId) => AgentLibrary.getById(agentId)))
   ipcMain.handle('agents:create',     h((definition) => AgentLibrary.create(definition)))
   ipcMain.handle('agents:usageCount', h((agentId) => AgentLibrary.usageCount(agentId)))
+  ipcMain.handle('agents:open-editor', h(({ agentId }) => AgentEditor.open(agentId, win)))
+  ipcMain.handle('agents:update-review-target', h(({ agentId, reviewTargetId }) => AgentLibrary.updateReviewTarget(agentId, reviewTargetId)))
+  ipcMain.handle('agents:update-loop-config', h(({ agentId, loopType, maxRevisionLoops }) => AgentLibrary.updateLoopConfig(agentId, loopType, maxRevisionLoops)))
 
   // ── First Launch ─────────────────────────────────────────────────────────
   ipcMain.handle('first-launch:check', h(async () => {
@@ -74,7 +77,7 @@ function registerIpcHandlers(win) {
   ipcMain.handle('pipeline:pause',        h(() => PipelineRunner.pause()))
   ipcMain.handle('pipeline:resume',       h(() => PipelineRunner.resume()))
   ipcMain.handle('pipeline:abort',        h(() => PipelineRunner.abort()))
-  ipcMain.handle('pipeline:update-steps', h(({ steps }) => PipelineRunner.updateSteps(steps)))
+  ipcMain.handle('pipeline:update-steps', h(({ steps, projectPath }) => PipelineRunner.updateSteps(steps, projectPath)))
   ipcMain.handle('pipeline:skip-agent',   h(({ stepIndex, projectPath }) => PipelineRunner.skipAgent(stepIndex, projectPath)))
   ipcMain.handle('pipeline:unskip-agent', h(({ stepIndex, projectPath }) => PipelineRunner.unskipAgent(stepIndex, projectPath)))
   ipcMain.handle('agent:kill',            h(() => PipelineRunner.killCurrent()))
@@ -103,6 +106,16 @@ function registerIpcHandlers(win) {
       return { exists: false }
     }
     await shell.openPath(outputPath)
+    return { exists: true, ok: true }
+  }))
+  ipcMain.handle('context:open-agent-file', h(async ({ projectPath, agentFilePath }) => {
+    // Open the agent's Context/agent.md file (the input file, not output)
+    const agentFileName = path.basename(agentFilePath)
+    const agentContextPath = path.join(projectPath, 'Context', agentFileName)
+    if (!fsSync.existsSync(agentContextPath)) {
+      return { exists: false }
+    }
+    await shell.openPath(agentContextPath)
     return { exists: true, ok: true }
   }))
 
