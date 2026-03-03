@@ -45,6 +45,9 @@ const state = {
   preflightPhase: null, // null | 'loading' | 'choice' | 'sandbox-warning' | 'approve-list' | 'decline-warning'
   preflightDelta: [],   // Discovered commands not in baseline
   preflightDockerError: false,
+
+  // Revision loop counts
+  revisionLoopCounts: {},
 }
 
 const NP_STEP_SUBTITLES = [
@@ -755,6 +758,13 @@ async function assignReviewTarget(reviewerAgentId, reviewerAgentName, targetAgen
       if (existingReviewer) {
         existingReviewer.review_target = null
       }
+
+      // Clear review_target and loop from the existing reviewer's step
+      const existingReviewerStep = state.pipelineSteps.find(s => s.agent_id === existingReviewerId)
+      if (existingReviewerStep) {
+        existingReviewerStep.review_target = null
+        existingReviewerStep.loop = null
+      }
     }
 
     // Update the reviewer agent's YAML file with the target's UUID
@@ -770,6 +780,27 @@ async function assignReviewTarget(reviewerAgentId, reviewerAgentName, targetAgen
     const reviewerAgent = state.agents.find(a => a.id === reviewerAgentId)
     if (reviewerAgent) {
       reviewerAgent.review_target = targetAgentId
+    }
+
+    // Update the pipeline step with review_target and loop config
+    const reviewerStep = state.pipelineSteps.find(s => s.agent_id === reviewerAgentId)
+    console.log('assignReviewTarget debug:', {
+      reviewerAgentId,
+      targetAgentId,
+      reviewerStepFound: !!reviewerStep,
+      reviewerStepBefore: reviewerStep ? { ...reviewerStep } : null,
+      reviewerAgentLoop: reviewerAgent?.loop
+    })
+    if (reviewerStep) {
+      reviewerStep.review_target = targetAgentId
+      // Copy loop config from agent to step
+      if (reviewerAgent.loop && reviewerAgent.loop.type) {
+        reviewerStep.loop = { ...reviewerAgent.loop }
+      } else {
+        // Default to revision loop with 5 max iterations
+        reviewerStep.loop = { type: 'revision', max_revision_loops: 5 }
+      }
+      console.log('reviewerStep after update:', reviewerStep)
     }
 
     // Reorder agents: move reviewer agent to be right after target agent
@@ -814,6 +845,12 @@ async function reorderAgentsAfterTarget(targetAgentId, reviewerAgentId) {
   // Remove reviewer from current position
   const [reviewerStep] = state.pipelineSteps.splice(reviewerIndex, 1)
 
+  console.log('reorderAgentsAfterTarget debug:', {
+    reviewerStep,
+    hasReviewTarget: !!reviewerStep.review_target,
+    hasLoop: !!reviewerStep.loop
+  })
+
   // If reviewer was before target, targetIndex shifted down by 1
   const adjustedTargetIndex = reviewerIndex < targetIndex ? targetIndex - 1 : targetIndex
 
@@ -823,6 +860,12 @@ async function reorderAgentsAfterTarget(targetAgentId, reviewerAgentId) {
 
   // Save updated pipeline to project JSON
   if (state.currentProject) {
+    console.log('Calling updatePipelineSteps with steps:', state.pipelineSteps.map(s => ({
+      agent_id: s.agent_id,
+      agent_name: s.agent_name,
+      review_target: s.review_target,
+      loop: s.loop
+    })))
     try {
       await window.api.updatePipelineSteps(state.pipelineSteps, state.currentProject.projectPath)
       appendLogLine(`Reordered pipeline: "${reviewerStep.agent_name}" moved to position ${newIndex + 1}`, 'info')
@@ -876,6 +919,12 @@ function handlePipelineStatus(data) {
   // Handle review-loop state
   if (data.state === 'review-loop' && data.loopType) {
     updateReviewPips(data.agentId, data.loopCount, data.maxLoops, data.loopType)
+  }
+
+  // Handle revision-loop state
+  if (data.state === 'revision-loop') {
+    state.revisionLoopCounts[data.agentId] = data.loopCount
+    renderPipelineCanvas()
   }
 
   // Handle max-loops-reached state
@@ -1528,18 +1577,51 @@ function renderPipelineCanvas() {
 
     // Add connector if not last
     if (index < state.pipelineSteps.length - 1) {
+      const nextStep = state.pipelineSteps[index + 1]
+      const hasLoop = nextStep && nextStep.loop && (nextStep.loop.type === 'revision' || nextStep.loop.type === 'iteration') && nextStep.review_target
+
       const connector = document.createElement('div')
-      connector.className = 'connector'
-      // All connectors are done when pipeline is complete
-      if (state.pipelineState === 'complete' || index < state.currentStepIndex) {
-        connector.classList.add('done')
-      } else if (index === state.currentStepIndex && state.pipelineState === 'running') {
-        connector.classList.add('active')
+
+      if (hasLoop) {
+        const reviewerAgent  = state.agents.find(a => a.id === nextStep.agent_id)
+        const loopType       = nextStep.loop.type
+        const maxLoops       = reviewerAgent?.loop?.max_revision_loops ?? 5
+        const currentLoop    = state.revisionLoopCounts?.[nextStep.agent_id] ?? 0
+        const reviewerStatus = nextStep.status || 'idle'
+
+        connector.className = `connector revision-link${reviewerStatus === 'running' ? ' active' : ''}`
+
+        const line = document.createElement('div')
+        line.className = 'connector-line'
+
+        const arrow = document.createElement('div')
+        arrow.className = 'connector-arrow'
+        arrow.textContent = '↺'
+
+        connector.appendChild(line)
+        connector.appendChild(arrow)
+
+        // Only show loop count for revision loops (bounded), not iteration (unbounded)
+        if (loopType === 'revision') {
+          const loopLabel = document.createElement('span')
+          loopLabel.className = 'connector-loop-count'
+          loopLabel.textContent = `${currentLoop}/${maxLoops}`
+          connector.appendChild(loopLabel)
+        }
+      } else {
+        connector.className = 'connector'
+        // All connectors are done when pipeline is complete
+        if (state.pipelineState === 'complete' || index < state.currentStepIndex) {
+          connector.classList.add('done')
+        } else if (index === state.currentStepIndex && state.pipelineState === 'running') {
+          connector.classList.add('active')
+        }
+        connector.innerHTML = `
+          <div class="connector-line"></div>
+          <div class="connector-arrow">›</div>
+        `
       }
-      connector.innerHTML = `
-        <div class="connector-line"></div>
-        <div class="connector-arrow">›</div>
-      `
+
       canvas.appendChild(connector)
     }
   })
@@ -2072,10 +2154,33 @@ async function loadProject(projectPath) {
       agent_name: state.agents.find(a => a.id === step.agent_id)?.name || 'Unknown',
     }))
 
+    // Migrate review_target and loop from agents to steps if missing
+    // This handles projects where reviewer targets were assigned before the fix
+    state.pipelineSteps.forEach(step => {
+      const agent = state.agents.find(a => a.id === step.agent_id)
+      if (agent) {
+        // Migrate review_target if step doesn't have it but agent does
+        if (!step.review_target && agent.review_target) {
+          step.review_target = agent.review_target
+        }
+        // Migrate loop config if step doesn't have it but agent does
+        if (!step.loop && agent.loop && agent.loop.type) {
+          step.loop = { ...agent.loop }
+        }
+      }
+    })
+    console.log('Pipeline steps after migration:', state.pipelineSteps.map(s => ({
+      agent_id: s.agent_id,
+      agent_name: s.agent_name,
+      review_target: s.review_target,
+      loop: s.loop
+    })))
+
     state.currentStepIndex = -1
     state.pipelineState = 'idle'
     state.selectedNodeIndex = -1
     state.selectedAgentId = null
+    state.revisionLoopCounts = {}
 
     renderPipelineAgents()
     renderLibraryAgents()
@@ -3030,6 +3135,8 @@ async function handleAuthSave() {
 
 async function startPipeline(resumeFrom = null) {
   if (!state.currentProject) return
+
+  state.revisionLoopCounts = {}
 
   try {
     const result = await window.api.startPipeline(state.currentProject.projectPath, resumeFrom)

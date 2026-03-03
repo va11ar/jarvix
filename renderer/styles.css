@@ -634,6 +634,50 @@ html, body {
 .connector.done   .connector-line  { background: var(--green-dim); }
 .connector.done   .connector-arrow { color: var(--green-dim); }
 
+.connector.revision-link {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.connector.revision-link .connector-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  flex: none;
+  background: var(--yellow);
+}
+.connector.revision-link .connector-arrow {
+  position: relative;
+  color: #ffd700;
+  font-weight: 600;
+}
+
+.connector.revision-link.active .connector-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  flex: none;
+  background: var(--amber);
+}
+.connector.revision-link.active .connector-arrow {
+  position: relative;
+  color: #7ec8ff;
+  font-weight: 600;
+}
+
+.connector-loop-count {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 9px;
+  color: var(--text-dim);
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.connector.revision-link.active .connector-loop-count { color: var(--yellow); }
+
 /* ─── COL 3: DETAIL ─────────────────────────────────────── */
 #col-detail {
   width: 210px;
