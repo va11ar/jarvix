@@ -22,6 +22,10 @@
   --yellow-dim: #4a3e28;
   --amber:      #6b9ab8;
   --amber-dim:  #1e3348;
+  --select-source-border:   #c4a050;
+  --select-source-dim:      #332a14;
+  --select-eligible-border: #7aab6a;
+  --select-eligible-dim:    #1e3318;
   --mono:       'IBM Plex Mono', monospace;
   --sans:       'IBM Plex Sans', sans-serif;
 }
@@ -544,7 +548,15 @@ html, body {
   box-shadow: 0 0 8px -2px var(--amber-dim);
   animation: node-pulse 2s ease-in-out infinite;
 }
-.pipeline-node.complete { border-color: var(--green-dim); }
+.pipeline-node.complete {
+  border-color: var(--green-dim);
+  background: var(--bg);
+  opacity: 0.72;
+}
+.pipeline-node.complete .node-name      { color: var(--text-dim); }
+.pipeline-node.complete .node-index     { color: var(--text-faint); }
+.pipeline-node.complete .node-status    { color: var(--green); }
+.pipeline-node.complete .node-state-bar { background: var(--green); }
 .pipeline-node.error    { border-color: var(--red); box-shadow: 0 0 12px -4px var(--red); }
 .pipeline-node.idle     { border-color: var(--border2); }
 .pipeline-node.skipped  { border-color: var(--yellow-dim); opacity: 0.55; }
@@ -1611,3 +1623,91 @@ html, body {
     box-shadow: 0 0 12px var(--accent-dim);
   }
 }
+
+/* ── REVIEW TARGET SELECTION MODE ───────────────────────── */
+
+#review-target-banner {
+  display: none;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 14px;
+  background: var(--select-source-dim);
+  border-bottom: 1px solid var(--select-source-border);
+  font-size: 10px;
+  color: var(--yellow);
+  letter-spacing: 0.05em;
+  flex-shrink: 0;
+  z-index: 10;
+}
+#review-target-banner.active { display: flex; }
+
+.review-banner-icon {
+  font-size: 12px;
+  opacity: 0.8;
+  flex-shrink: 0;
+}
+.review-banner-text { flex: 1; }
+.review-banner-text strong { color: var(--text); font-weight: 600; }
+
+.review-banner-cancel {
+  font-size: 9px;
+  color: var(--text-faint);
+  background: none;
+  border: 1px solid var(--border2);
+  border-radius: 2px;
+  padding: 2px 8px;
+  cursor: pointer;
+  font-family: var(--mono);
+  letter-spacing: 0.05em;
+  transition: color 0.1s, border-color 0.1s, background 0.1s;
+}
+.review-banner-cancel:hover {
+  color: var(--text);
+  border-color: var(--text-faint);
+  background: var(--bg2);
+}
+
+/* Source node — the reviewer being assigned */
+.pipeline-node.review-source {
+  border-color: var(--select-source-border) !important;
+  box-shadow: 0 0 0 1px var(--select-source-dim) !important;
+  background: var(--select-source-dim) !important;
+  cursor: default !important;
+}
+.pipeline-node.review-source .node-index  { color: var(--yellow); }
+.pipeline-node.review-source .node-name   { color: var(--yellow); }
+.pipeline-node.review-source .node-status { color: var(--select-source-border); }
+.pipeline-node.review-source .node-state-bar { background: var(--select-source-border); }
+
+/* Eligible target nodes */
+.pipeline-node.review-eligible {
+  border-color: var(--select-eligible-border) !important;
+  box-shadow: 0 0 0 1px var(--select-eligible-dim) !important;
+  cursor: crosshair !important;
+  animation: review-eligible-pulse 2s ease-in-out infinite;
+}
+.pipeline-node.review-eligible .node-index  { color: var(--green); }
+.pipeline-node.review-eligible .node-name   { color: var(--text); }
+.pipeline-node.review-eligible .node-status { color: var(--select-eligible-border); }
+.pipeline-node.review-eligible .node-state-bar { background: var(--select-eligible-border); }
+
+.pipeline-node.review-eligible:hover {
+  background: var(--select-eligible-dim) !important;
+  border-color: var(--green) !important;
+  box-shadow: 0 0 8px -2px var(--select-eligible-border) !important;
+  animation: none;
+}
+
+@keyframes review-eligible-pulse {
+  0%, 100% { box-shadow: 0 0 0 1px var(--select-eligible-dim); }
+  50%       { box-shadow: 0 0 6px -1px var(--select-eligible-border); }
+}
+
+/* Ineligible nodes — dimmed, non-interactive */
+.pipeline-node.review-dim {
+  opacity: 0.28;
+  pointer-events: none;
+}
+
+/* Connectors — muted during selection */
+#canvas-inner.selection-mode .connector { opacity: 0.3; }

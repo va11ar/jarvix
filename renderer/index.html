@@ -92,6 +92,13 @@
 
       <!-- ── COL 2: CANVAS ── -->
       <div id="col-canvas">
+        <div id="review-target-banner">
+          <span class="review-banner-icon">◎</span>
+          <span class="review-banner-text">
+            Select a target for <strong id="review-banner-source-name"></strong> — click any highlighted agent
+          </span>
+          <button class="review-banner-cancel" id="btn-review-banner-cancel">Cancel  ✕</button>
+        </div>
         <div id="canvas-inner">
           <div id="pipeline-canvas"></div>
         </div>
@@ -538,7 +545,7 @@
 
   <!-- Agent Context Menu -->
   <div class="context-menu hidden" id="agent-context-menu">
-    <div class="context-menu-item" data-action="assign-review-target">Assign a review Target</div>
+    <div class="context-menu-item" data-action="assign-review-target">Assign review target</div>
     <div class="context-menu-item" data-action="remove-agent">Remove Agent</div>
     <div class="context-menu-item" data-action="edit-agent">Edit Agent</div>
     <div class="context-menu-item" data-action="skip-agent">Skip Agent</div>

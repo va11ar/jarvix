@@ -534,41 +534,102 @@ async function handleAssignReviewTarget(reviewerAgentId, reviewerAgentName) {
       reviewerHasTarget: hasExistingTarget,
     }
 
-    // Highlight all eligible agents (all except the reviewer)
-    highlightEligibleAgents(reviewerAgentId)
+    // Enter selection mode with new visual treatment
+    enterReviewTargetSelection(reviewerAgentId)
 
-    appendLogLine(`Select a target agent for "${reviewerAgentName}" to review. Click outside an agent to cancel.`, 'info')
+    appendLogLine(`Select a target for "${reviewerAgentName}" — click any highlighted agent`, 'info')
   } catch (e) {
     appendLogLine('Failed to start review target assignment: ' + e.message, 'error')
   }
 }
 
 /**
- * Highlight all eligible target agents (all except the reviewer)
- * @param {string} reviewerAgentId - ID of the reviewer agent to exclude
+ * Enter review target selection mode with new visual treatment
+ * @param {string} sourceAgentId - ID of the reviewer agent
  */
-function highlightEligibleAgents(reviewerAgentId) {
-  // Add eligible-target class to pipeline agent items except the reviewer
-  document.querySelectorAll('#pipeline-agents-list .agent-item').forEach((item) => {
-    const itemId = item.dataset.agentId
-    if (itemId !== reviewerAgentId) {
-      item.classList.add('eligible-target')
+function enterReviewTargetSelection(sourceAgentId) {
+  const sourceName = state.agents.find(a => a.id === sourceAgentId)?.name || sourceAgentId
+
+  document.getElementById('review-banner-source-name').textContent = sourceName
+  document.getElementById('review-target-banner').classList.add('active')
+  document.getElementById('canvas-inner').classList.add('selection-mode')
+
+  state.pipelineSteps.forEach((step) => {
+    const el = document.querySelector(`.pipeline-node[data-agent-id="${step.agent_id}"]`)
+    if (!el) return
+    el.classList.remove('review-source', 'review-eligible', 'review-dim')
+
+    if (step.agent_id === sourceAgentId) {
+      el.classList.add('review-source')
+    } else {
+      el.classList.add('review-eligible')
+      el.addEventListener('click', onReviewTargetNodeClick)
     }
   })
 
-  // Do NOT highlight library agents - only pipeline agents are eligible targets
+  document.getElementById('btn-review-banner-cancel').onclick =
+    () => exitReviewTargetSelection(false, null)
+}
 
-  document.querySelectorAll('.pipeline-node').forEach((node) => {
-    const nodeId = node.dataset.agentId
-    if (nodeId !== reviewerAgentId) {
-      node.classList.add('eligible-target')
+/**
+ * Handle click on a review-eligible node
+ */
+function onReviewTargetNodeClick() {
+  exitReviewTargetSelection(true, this.dataset.agentId)
+}
+
+/**
+ * Exit review target selection mode
+ * @param {boolean} confirmed - Whether the user confirmed the selection
+ * @param {string|null} targetAgentId - The selected target agent ID (if confirmed)
+ */
+function exitReviewTargetSelection(confirmed, targetAgentId) {
+  document.getElementById('review-target-banner').classList.remove('active')
+  document.getElementById('canvas-inner').classList.remove('selection-mode')
+
+  state.pipelineSteps.forEach(step => {
+    const el = document.querySelector(`.pipeline-node[data-agent-id="${step.agent_id}"]`)
+    if (!el) return
+    el.classList.remove('review-source', 'review-eligible', 'review-dim')
+    el.removeEventListener('click', onReviewTargetNodeClick)
+  })
+
+  if (confirmed && targetAgentId) {
+    // Call the existing assignReviewTarget function with the selected target
+    const { reviewerAgentId, reviewerAgentName } = selectionModeState
+    const targetAgent = state.agents.find(a => a.id === targetAgentId)
+    const targetAgentName = targetAgent?.name || 'Unknown'
+
+    // Check for existing reviewer on target
+    const existingReviewer = state.agents.find(a => a.review_target === targetAgentId && a.id !== reviewerAgentId)
+    if (existingReviewer) {
+      // Need to show dialog - use the existing flow
+      exitSelectionMode()
+      document.getElementById('target-existing-reviewer-name').textContent = existingReviewer.name
+      showDialog('dialog-target-already-assigned')
+
+      // Wait for user response
+      const continueBtn = document.getElementById('btn-target-assigned-continue')
+      const cancelBtn = document.getElementById('btn-target-assigned-cancel')
+      const newContinueBtn = continueBtn.cloneNode(true)
+      const newCancelBtn = cancelBtn.cloneNode(true)
+      continueBtn.parentNode.replaceChild(newContinueBtn, continueBtn)
+      cancelBtn.parentNode.replaceChild(newCancelBtn, cancelBtn)
+
+      newContinueBtn.addEventListener('click', () => {
+        hideDialog('dialog-target-already-assigned')
+        assignReviewTarget(reviewerAgentId, reviewerAgentName, targetAgentId, targetAgentName, existingReviewer.id)
+      })
+      newCancelBtn.addEventListener('click', () => {
+        hideDialog('dialog-target-already-assigned')
+        appendLogLine('Review target assignment canceled by user', 'info')
+      })
+      return
     }
-  })
 
-  // Add click handlers to eligible agents
-  document.querySelectorAll('.eligible-target').forEach((el) => {
-    el.addEventListener('click', handleEligibleAgentClick, { once: true })
-  })
+    // No existing reviewer - proceed with assignment
+    assignReviewTarget(reviewerAgentId, reviewerAgentName, targetAgentId, targetAgentName)
+  }
 }
 
 /**
@@ -775,9 +836,18 @@ async function reorderAgentsAfterTarget(targetAgentId, reviewerAgentId) {
  * Exit selection mode and clean up highlighting
  */
 function exitSelectionMode() {
-  // Remove eligible-target class from all elements
+  // Remove eligible-target class from all elements (legacy support)
   document.querySelectorAll('.eligible-target').forEach((el) => {
     el.classList.remove('eligible-target')
+  })
+
+  // Also clean up new selection mode UI
+  document.getElementById('review-target-banner')?.classList.remove('active')
+  document.getElementById('canvas-inner')?.classList.remove('selection-mode')
+
+  // Remove any lingering review-* classes from pipeline nodes
+  document.querySelectorAll('.pipeline-node').forEach((node) => {
+    node.classList.remove('review-source', 'review-eligible', 'review-dim')
   })
 
   selectionModeState = null
@@ -788,9 +858,8 @@ function exitSelectionMode() {
  */
 function cancelSelectionMode() {
   if (selectionModeState) {
-    appendLogLine('Review target assignment canceled', 'info')
+    exitReviewTargetSelection(false, null)
   }
-  exitSelectionMode()
 }
 
 // ─── Pipeline Status Handler ────────────────────────────────────────────────
