@@ -49,6 +49,8 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.invoke('context:open-output', { projectPath, agentFilePath }),
   openAgentFile: (projectPath, agentFilePath) =>
     ipcRenderer.invoke('context:open-agent-file', { projectPath, agentFilePath }),
+  openBriefFile: (projectPath) =>
+    ipcRenderer.invoke('context:open-brief', { projectPath }),
 
   // Settings
   getSettings: () => ipcRenderer.invoke('settings:get'),

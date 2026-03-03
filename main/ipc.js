@@ -118,6 +118,14 @@ function registerIpcHandlers(win) {
     await shell.openPath(agentContextPath)
     return { exists: true, ok: true }
   }))
+  ipcMain.handle('context:open-brief', h(async ({ projectPath }) => {
+    const briefPath = path.join(projectPath, 'Context', 'brief.md')
+    if (!fsSync.existsSync(briefPath)) {
+      return { exists: false }
+    }
+    await shell.openPath(briefPath)
+    return { exists: true, ok: true }
+  }))
 
   // ── Settings ─────────────────────────────────────────────────────────────
   ipcMain.handle('settings:get', h(() => Settings.load()))

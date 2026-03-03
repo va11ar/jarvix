@@ -102,6 +102,7 @@ html, body {
   height: 100%;
   display: flex;
   align-items: center;
+  gap: 8px;
   flex-shrink: 0;
   -webkit-app-region: no-drag;
 }
@@ -109,6 +110,25 @@ html, body {
 .tb-project span {
   color: var(--text);
   font-weight: 500;
+  cursor: pointer;
+}
+
+.tb-project span:hover {
+  color: var(--accent);
+}
+
+.tb-project-tooltip {
+  font-size: 10px;
+  color: var(--text-dim);
+  font-style: italic;
+  opacity: 0;
+  transition: opacity 0.2s;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.tb-project-tooltip.visible {
+  opacity: 1;
 }
 
 .tb-controls {
@@ -208,31 +228,6 @@ html, body {
 }
 .wc-btn:hover { background: var(--bg3); color: var(--text); }
 .wc-btn.close:hover { background: var(--red); color: #fff; }
-
-/* ─── BRIEFBAR ──────────────────────────────────────────── */
-#briefbar {
-  height: 30px;
-  min-height: 30px;
-  background: var(--bg1);
-  border-bottom: 1px solid var(--border);
-  display: flex;
-  align-items: center;
-  padding: 0 14px;
-  -webkit-app-region: drag;
-  user-select: none;
-  flex-shrink: 0;
-}
-
-#brief-text {
-  font-family: var(--mono);
-  font-size: 11px;
-  color: var(--text-dim);
-  font-style: italic;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  -webkit-app-region: no-drag;
-}
 
 /* ─── MAIN AREA ─────────────────────────────────────────── */
 #main {

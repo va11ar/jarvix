@@ -142,6 +142,23 @@ function wireEventListeners() {
   document.getElementById('btn-maximize').addEventListener('click', () => window.api.maximizeWindow())
   document.getElementById('btn-close').addEventListener('click', () => window.api.closeWindow())
 
+  // Project brief edit
+  document.getElementById('tb-project-name').addEventListener('click', async () => {
+    if (!state.currentProject) return
+    try {
+      const result = await window.api.openBriefFile(state.currentProject.projectPath)
+      if (result.error) {
+        appendLogLine('Failed to open brief: ' + result.error, 'error')
+        return
+      }
+      if (!result.exists) {
+        appendLogLine('Brief file not found. Create one in Context/brief.md', 'warn')
+      }
+    } catch (e) {
+      appendLogLine('Failed to open brief: ' + e.message, 'error')
+    }
+  })
+
   // Pipeline controls
   document.getElementById('btn-start').addEventListener('click', handleStart)
   document.getElementById('btn-pause').addEventListener('click', togglePause)
@@ -2150,6 +2167,18 @@ function escapeHtml(text) {
   return div.innerHTML
 }
 
+function showBriefTooltip() {
+  const tooltip = document.getElementById('tb-project-tooltip')
+  if (!tooltip) return
+  
+  tooltip.classList.add('visible')
+  
+  // Hide after 3 seconds
+  setTimeout(() => {
+    tooltip.classList.remove('visible')
+  }, 3000)
+}
+
 // ─── Project Management ─────────────────────────────────────────────────────
 
 async function openProjectDialog() {
@@ -2190,14 +2219,6 @@ async function loadProject(projectPath) {
 
     state.currentProject = result
     document.getElementById('tb-project-name').textContent = result.projectJson.name
-
-    // Load brief
-    try {
-      const brief = await window.api.readContextFile(pathJoin(projectPath, 'Context', 'brief.md'))
-      document.getElementById('brief-text').textContent = brief ? brief.split('\n')[0] : 'No brief loaded'
-    } catch {
-      document.getElementById('brief-text').textContent = 'No brief loaded'
-    }
 
     // Load pipeline steps with agent names
     state.pipelineSteps = (result.pipelineJson.steps || []).map(step => ({
@@ -2242,6 +2263,9 @@ async function loadProject(projectPath) {
     updateStatusBar()
 
     hideDialog('dialog-welcome')
+    
+    // Show tooltip hint for editing brief
+    showBriefTooltip()
   } catch (e) {
     appendLogLine('Failed to load project: ' + e.message, 'error')
   }
