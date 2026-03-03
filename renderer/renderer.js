@@ -393,9 +393,28 @@ function showContextMenu(e, agentId, agentName, index, source) {
     }
   }
 
-  // Show/hide the menu item
+  // Show/hide the menu items
   if (assignTargetItem) {
     assignTargetItem.style.display = showAssignTarget ? 'block' : 'none'
+  }
+
+  const removeAgentItem = menu.querySelector('[data-action="remove-agent"]')
+  if (removeAgentItem) {
+    removeAgentItem.style.display = source === 'pipeline' ? 'block' : 'none'
+  }
+
+  // Skip Agent only available for pipeline agents
+  const skipAgentItem = menu.querySelector('[data-action="skip-agent"]')
+  if (skipAgentItem) {
+    skipAgentItem.style.display = source === 'pipeline' ? 'block' : 'none'
+    // Update text based on agent's skipped status
+    if (source === 'pipeline' && index !== -1 && state.pipelineSteps[index]) {
+      const isSkipped = state.pipelineSteps[index].status === 'skipped'
+      skipAgentItem.textContent = isSkipped ? 'Unskip Agent' : 'Skip Agent'
+    } else {
+      // Reset to default when not applicable
+      skipAgentItem.textContent = 'Skip Agent'
+    }
   }
 
   menu.classList.remove('hidden')
@@ -439,7 +458,7 @@ async function handleContextMenuAction(action) {
       handleAssignReviewTarget(agentId, agentName)
       break
     case 'remove-agent':
-      appendLogLine(`Feature not implemented yet: Remove Agent "${agentName}"`, 'info')
+      await handleRemoveAgentFromContextMenu()
       break
     case 'edit-agent':
       try {
@@ -449,13 +468,13 @@ async function handleContextMenuAction(action) {
       }
       break
     case 'skip-agent':
-      appendLogLine(`Feature not implemented yet: Skip Agent "${agentName}"`, 'info')
+      await _skipUnskipAgent(contextMenuTarget.index, agentName)
       break
-    case 'edit-output':
-      appendLogLine(`Feature not implemented yet: Edit Output for "${agentName}"`, 'info')
+    case 'edit-context':
+      await handleCheckpointFile(contextMenuTarget.agentId)
       break
     case 'kill-agent':
-      appendLogLine(`Feature not implemented yet: Kill Agent "${agentName}"`, 'info')
+      await handleKillAgentFromContextMenu(agentId, agentName)
       break
   }
 }
@@ -467,8 +486,8 @@ function attachContextMenuListener(element) {
     let index = -1
     let source = 'library'
 
-    // Check if this is a pipeline agent item
-    if (agentId) {
+    // Check if this is a pipeline agent item (has dataset.index)
+    if (element.dataset.index !== undefined) {
       agentName = element.querySelector('.agent-name')?.textContent || 'Unknown'
       index = parseInt(element.dataset.index, 10)
       source = 'pipeline'
@@ -2015,6 +2034,29 @@ async function handleKillAgent() {
   }
 }
 
+async function handleKillAgentFromContextMenu(agentId, agentName) {
+  try {
+    // Check if pipeline is running
+    if (state.pipelineState !== 'running') {
+      appendLogLine('Pipeline is not running', 'warn')
+      return
+    }
+
+    // Check if the right-clicked agent is the currently running one
+    const currentStep = state.pipelineSteps[state.currentStepIndex]
+    if (!currentStep || currentStep.agent_id !== agentId) {
+      appendLogLine(`Cannot kill "${agentName}": only the currently running agent can be killed`, 'warn')
+      return
+    }
+
+    // Kill the agent (same as the details pane button)
+    await window.api.killAgent()
+    appendLogLine(`Killed agent "${agentName}"`, 'info')
+  } catch (e) {
+    appendLogLine('Failed to kill agent: ' + e.message, 'error')
+  }
+}
+
 async function handleEditOutput() {
   try {
     if (!state.currentProject || state.selectedNodeIndex === -1) {
@@ -2039,19 +2081,24 @@ async function handleEditOutput() {
   }
 }
 
-async function handleCheckpointFile() {
+async function handleCheckpointFile(agentId) {
   try {
     if (!state.currentProject) {
       appendLogLine('No project open', 'warn')
       return
     }
 
-    // Determine which agent is selected (library or pipeline)
+    // Determine which agent to open
     let agent = null
 
-    if (state.selectedLibraryAgentId) {
+    if (agentId) {
+      // Called from context menu - use the right-clicked agent
+      agent = state.agents.find(a => a.id === agentId)
+    } else if (state.selectedLibraryAgentId) {
+      // Called from button - use selected library agent
       agent = state.agents.find(a => a.id === state.selectedLibraryAgentId)
     } else if (state.selectedNodeIndex !== -1 && state.pipelineSteps[state.selectedNodeIndex]) {
+      // Called from button - use selected pipeline agent
       const step = state.pipelineSteps[state.selectedNodeIndex]
       agent = state.agents.find(a => a.id === step.agent_id)
     }
@@ -2712,6 +2759,80 @@ async function handleRemoveAgent() {
   }
 }
 
+async function handleRemoveAgentFromContextMenu() {
+  if (!contextMenuTarget || contextMenuTarget.source !== 'pipeline') return
+
+  const { index, agentName } = contextMenuTarget
+
+  if (index === -1 || !state.pipelineSteps[index]) {
+    appendLogLine('Invalid agent index', 'error')
+    return
+  }
+
+  try {
+    // Remove agent from pipeline steps
+    state.pipelineSteps.splice(index, 1)
+
+    // Save updated pipeline
+    await window.api.updatePipelineSteps(state.pipelineSteps, state.currentProject.projectPath)
+
+    appendLogLine(`Removed "${agentName}" from pipeline`, 'ok')
+
+    // Refresh agents list from library
+    const result = await window.api.listAgents()
+    state.agents = result?.agents || []
+
+    // Clear selection
+    state.selectedNodeIndex = -1
+    state.selectedAgentId = null
+    state.selectedLibraryAgentId = null
+
+    // Re-render UI
+    renderPipelineAgents()
+    renderLibraryAgents()
+    renderPipelineCanvas()
+    updateDetailPanel()
+  } catch (e) {
+    appendLogLine('Failed to remove agent: ' + e.message, 'error')
+  }
+}
+
+async function _skipUnskipAgent(stepIndex, agentName) {
+  const isSkipped = state.pipelineSteps[stepIndex].status === 'skipped'
+
+  try {
+    let result
+    if (isSkipped) {
+      // Unskip the selected agent
+      result = await window.api.unskipAgent(stepIndex, state.currentProject?.projectPath)
+      if (result.error) {
+        appendLogLine('Failed to unskip agent: ' + result.error, 'error')
+        return
+      }
+      appendLogLine(`Unskipped "${agentName}"`, 'ok')
+      // Update local state immediately for responsive UI
+      state.pipelineSteps[stepIndex].status = 'idle'
+    } else {
+      // Skip the selected agent
+      result = await window.api.skipAgent(stepIndex, state.currentProject?.projectPath)
+      if (result.error) {
+        appendLogLine('Failed to skip agent: ' + result.error, 'error')
+        return
+      }
+      appendLogLine(`Skipped "${agentName}"`, 'warn')
+      // Update local state immediately for responsive UI
+      state.pipelineSteps[stepIndex].status = 'skipped'
+    }
+
+    // Re-render UI to reflect the skipped state
+    renderPipelineAgents()
+    renderPipelineCanvas()
+    updateDetailPanel()
+  } catch (e) {
+    appendLogLine('Failed to skip/unskip agent: ' + e.message, 'error')
+  }
+}
+
 async function handleSkipAgent() {
   // Can only skip/unskip when pipeline is NOT running
   if (state.pipelineState === 'running') {
@@ -2727,39 +2848,8 @@ async function handleSkipAgent() {
 
   const selectedStep = state.pipelineSteps[state.selectedNodeIndex]
   const agentName = selectedStep.agent_name || 'Unknown'
-  const isSkipped = selectedStep.status === 'skipped'
 
-  try {
-    let result
-    if (isSkipped) {
-      // Unskip the selected agent
-      result = await window.api.unskipAgent(state.selectedNodeIndex, state.currentProject?.projectPath)
-      if (result.error) {
-        appendLogLine('Failed to unskip agent: ' + result.error, 'error')
-        return
-      }
-      appendLogLine(`Unskipped "${agentName}"`, 'ok')
-      // Update local state immediately for responsive UI
-      state.pipelineSteps[state.selectedNodeIndex].status = 'idle'
-    } else {
-      // Skip the selected agent
-      result = await window.api.skipAgent(state.selectedNodeIndex, state.currentProject?.projectPath)
-      if (result.error) {
-        appendLogLine('Failed to skip agent: ' + result.error, 'error')
-        return
-      }
-      appendLogLine(`Skipped "${agentName}"`, 'warn')
-      // Update local state immediately for responsive UI
-      state.pipelineSteps[state.selectedNodeIndex].status = 'skipped'
-    }
-
-    // Re-render UI to reflect the skipped state
-    renderPipelineAgents()
-    renderPipelineCanvas()
-    updateDetailPanel()
-  } catch (e) {
-    appendLogLine('Failed to skip/unskip agent: ' + e.message, 'error')
-  }
+  await _skipUnskipAgent(state.selectedNodeIndex, agentName)
 }
 
 // Shared drag state
