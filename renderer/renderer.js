@@ -429,7 +429,7 @@ function hideContextMenu() {
   contextMenuTarget = null
 }
 
-function handleContextMenuAction(action) {
+async function handleContextMenuAction(action) {
   if (!contextMenuTarget) return
 
   const { agentId, agentName, source } = contextMenuTarget
@@ -442,7 +442,11 @@ function handleContextMenuAction(action) {
       appendLogLine(`Feature not implemented yet: Remove Agent "${agentName}"`, 'info')
       break
     case 'edit-agent':
-      appendLogLine(`Feature not implemented yet: Edit Agent "${agentName}"`, 'info')
+      try {
+        await window.api.openAgentEditor(agentId)
+      } catch (e) {
+        appendLogLine(`Failed to open agent editor: ${e.message}`, 'error')
+      }
       break
     case 'skip-agent':
       appendLogLine(`Feature not implemented yet: Skip Agent "${agentName}"`, 'info')
