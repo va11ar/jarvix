@@ -60,6 +60,7 @@ contextBridge.exposeInMainWorld('api', {
   checkAuth: () => ipcRenderer.invoke('auth:check'),
   configureAuth: (config) => ipcRenderer.invoke('auth:configure', config),
   testAuth: (config) => ipcRenderer.invoke('auth:test', config),
+  getAuthSettings: () => ipcRenderer.invoke('auth:get-settings'),
 
   // Qwen Installation
   checkQwenInstalled: (customPath) => ipcRenderer.invoke('qwen:check-installed', customPath),

@@ -418,6 +418,16 @@ function setupFileMenu() {
     hideFileMenu()
     handleFileMenuExit()
   })
+
+  // Settings menu item
+  const menuSettings = document.getElementById('file-menu-settings')
+  if (menuSettings) {
+    menuSettings.addEventListener('click', (e) => {
+      e.stopPropagation()
+      hideFileMenu()
+      handleFileMenuSettings()
+    })
+  }
 }
 
 function hideFileMenu() {
@@ -465,6 +475,10 @@ function handleFileMenuFeedback() {
 
 function handleFileMenuExit() {
   window.api.closeWindow()
+}
+
+function handleFileMenuSettings() {
+  openSettingsDialog()
 }
 
 // ─── Context Menu ───────────────────────────────────────────────────────────
@@ -3198,6 +3212,41 @@ function wireNewProjectDialog() {
   document.getElementById('auth-api-key').addEventListener('input', () => setAuthSaveEnabled(false))
   document.getElementById('auth-base-url').addEventListener('input', () => setAuthSaveEnabled(false))
   document.getElementById('auth-model-name').addEventListener('input', () => setAuthSaveEnabled(false))
+
+  // Settings dialog
+  document.getElementById('btn-settings-close').addEventListener('click', () => {
+    hideDialog('dialog-settings')
+  })
+
+  document.getElementById('btn-settings-ok').addEventListener('click', handleSettingsSave)
+
+  // Settings sidebar tab switching
+  document.querySelectorAll('.settings-sidebar-item').forEach(item => {
+    item.addEventListener('click', () => {
+      const tabId = item.dataset.settingsTab
+      switchSettingsTab(tabId)
+    })
+  })
+
+  // Settings auth test button
+  document.getElementById('btn-settings-auth-test').addEventListener('click', handleSettingsAuthTest)
+
+  // Settings auth provider dropdown
+  document.getElementById('settings-auth-provider').addEventListener('change', handleSettingsProviderChange)
+
+  // Track changes to auth fields - reset test passed state when any field changes
+  document.getElementById('settings-auth-api-key').addEventListener('input', () => {
+    settingsAuthTestPassed = false
+    updateSettingsOkButton(false)
+  })
+  document.getElementById('settings-auth-base-url').addEventListener('input', () => {
+    settingsAuthTestPassed = false
+    updateSettingsOkButton(false)
+  })
+  document.getElementById('settings-auth-model-name').addEventListener('input', () => {
+    settingsAuthTestPassed = false
+    updateSettingsOkButton(false)
+  })
 }
 
 // ─── Dialog Utilities ───────────────────────────────────────────────────────
@@ -3346,6 +3395,223 @@ async function handleAuthSave() {
       state.qwenAuthConfigured = true
       appendLogLine('Authentication configured successfully', 'ok')
       hideDialog('dialog-auth-setup')
+    } else {
+      appendLogLine('Failed to configure auth: ' + result.error, 'error')
+    }
+  } catch (e) {
+    appendLogLine('Failed to configure auth: ' + e.message, 'error')
+  }
+}
+
+// ─── Settings Dialog ────────────────────────────────────────────────────────
+
+// Track original auth settings to detect changes
+let settingsAuthOriginal = null
+
+async function openSettingsDialog() {
+  showDialog('dialog-settings')
+  // Reset to default tab
+  switchSettingsTab('default-folder')
+  
+  // Load saved auth settings
+  await loadAuthSettings()
+  
+  // Reset test result
+  document.getElementById('settings-auth-test-result').textContent = ''
+  document.getElementById('settings-auth-test-result').className = ''
+  document.getElementById('settings-auth-test-note').style.display = 'none'
+  
+  // OK button is enabled by default (no changes yet)
+  document.getElementById('btn-settings-ok').disabled = false
+}
+
+async function loadAuthSettings() {
+  try {
+    const result = await window.api.getAuthSettings()
+    
+    // Store original values for change detection
+    settingsAuthOriginal = {
+      provider: result.provider || 'openai',
+      apiKey: result.apiKeyFull || '',
+      baseUrl: result.baseUrl || PROVIDER_BASE_URLS[result.provider || 'openai'] || PROVIDER_BASE_URLS.openai,
+      modelName: result.modelName || '',
+    }
+    
+    // Populate form fields
+    document.getElementById('settings-auth-provider').value = settingsAuthOriginal.provider
+    document.getElementById('settings-auth-api-key').value = settingsAuthOriginal.apiKey
+    document.getElementById('settings-auth-base-url').value = settingsAuthOriginal.baseUrl
+    document.getElementById('settings-auth-model-name').value = settingsAuthOriginal.modelName
+    
+    // Show Azure note if applicable
+    const noteEl = document.getElementById('settings-auth-test-note')
+    noteEl.style.display = (settingsAuthOriginal.provider === 'azure') ? 'block' : 'none'
+  } catch (e) {
+    appendLogLine('Failed to load auth settings: ' + e.message, 'error')
+    // Set defaults on error
+    settingsAuthOriginal = {
+      provider: 'openai',
+      apiKey: '',
+      baseUrl: PROVIDER_BASE_URLS.openai,
+      modelName: '',
+    }
+    document.getElementById('settings-auth-provider').value = 'openai'
+    document.getElementById('settings-auth-api-key').value = ''
+    document.getElementById('settings-auth-base-url').value = PROVIDER_BASE_URLS.openai
+    document.getElementById('settings-auth-model-name').value = ''
+  }
+}
+
+function switchSettingsTab(tabId) {
+  // Update sidebar items
+  document.querySelectorAll('.settings-sidebar-item').forEach(item => {
+    item.classList.toggle('active', item.dataset.settingsTab === tabId)
+  })
+
+  // Update tab content visibility
+  document.querySelectorAll('.settings-tab').forEach(tab => {
+    tab.classList.add('hidden')
+  })
+  const activeTab = document.getElementById(`settings-tab-${tabId}`)
+  if (activeTab) {
+    activeTab.classList.remove('hidden')
+  }
+}
+
+/**
+ * Check if auth settings have changed from original
+ * @returns {boolean} true if any auth field has changed
+ */
+function authSettingsChanged() {
+  if (!settingsAuthOriginal) return false
+  
+  const currentProvider = document.getElementById('settings-auth-provider').value
+  const currentApiKey = document.getElementById('settings-auth-api-key').value
+  const currentBaseUrl = document.getElementById('settings-auth-base-url').value
+  const currentModelName = document.getElementById('settings-auth-model-name').value
+  
+  return (
+    currentProvider !== settingsAuthOriginal.provider ||
+    currentApiKey !== settingsAuthOriginal.apiKey ||
+    currentBaseUrl !== settingsAuthOriginal.baseUrl ||
+    currentModelName !== settingsAuthOriginal.modelName
+  )
+}
+
+/**
+ * Update OK button state based on whether auth changed and test passed
+ * @param {boolean} testPassed - Whether connection test passed after changes
+ */
+function updateSettingsOkButton(testPassed = false) {
+  const changed = authSettingsChanged()
+  const okBtn = document.getElementById('btn-settings-ok')
+  
+  if (!changed) {
+    // No changes: OK is always enabled
+    okBtn.disabled = false
+  } else {
+    // Changes made: OK only enabled if test passed
+    okBtn.disabled = !testPassed
+  }
+}
+
+// Track whether auth test has passed for current changes
+let settingsAuthTestPassed = false
+
+function handleSettingsProviderChange() {
+  const provider = document.getElementById('settings-auth-provider').value
+  const baseUrlInput = document.getElementById('settings-auth-base-url')
+  // Always set the default base URL for the selected provider
+  if (PROVIDER_BASE_URLS[provider]) {
+    baseUrlInput.value = PROVIDER_BASE_URLS[provider]
+  }
+  // Show note for Azure (requires chat completion test)
+  const noteEl = document.getElementById('settings-auth-test-note')
+  noteEl.style.display = (provider === 'azure') ? 'block' : 'none'
+  // Reset test passed state and update OK button
+  settingsAuthTestPassed = false
+  updateSettingsOkButton(false)
+}
+
+async function handleSettingsAuthTest() {
+  const provider = document.getElementById('settings-auth-provider').value
+  const apiKey = document.getElementById('settings-auth-api-key').value
+  const baseUrl = document.getElementById('settings-auth-base-url').value
+  const modelName = document.getElementById('settings-auth-model-name').value
+
+  const resultEl = document.getElementById('settings-auth-test-result')
+
+  if (!apiKey) {
+    resultEl.textContent = 'Please enter an API key'
+    resultEl.className = 'error'
+    settingsAuthTestPassed = false
+    updateSettingsOkButton(false)
+    return
+  }
+
+  if (!modelName || modelName.trim() === '') {
+    resultEl.textContent = 'Model name is empty'
+    resultEl.className = 'error'
+    settingsAuthTestPassed = false
+    updateSettingsOkButton(false)
+    return
+  }
+
+  resultEl.textContent = 'Testing connection...'
+  resultEl.className = ''
+  settingsAuthTestPassed = false
+  updateSettingsOkButton(false)
+
+  try {
+    const result = await window.api.testAuth({ provider, apiKey, baseUrl, modelName })
+    if (result.ok) {
+      resultEl.textContent = result.message || 'Connection successful'
+      resultEl.className = 'ok'
+      settingsAuthTestPassed = true
+      updateSettingsOkButton(true)
+    } else {
+      resultEl.textContent = result.error || 'Connection failed'
+      resultEl.className = 'error'
+      settingsAuthTestPassed = false
+      updateSettingsOkButton(false)
+    }
+  } catch (e) {
+    resultEl.textContent = 'Test failed: ' + e.message
+    resultEl.className = 'error'
+    settingsAuthTestPassed = false
+    updateSettingsOkButton(false)
+  }
+}
+
+async function handleSettingsSave() {
+  const provider = document.getElementById('settings-auth-provider').value
+  const apiKey = document.getElementById('settings-auth-api-key').value
+  const baseUrl = document.getElementById('settings-auth-base-url').value
+  const modelName = document.getElementById('settings-auth-model-name').value
+
+  // If auth settings changed, require test first
+  if (authSettingsChanged() && !settingsAuthTestPassed) {
+    appendLogLine('Please test connection after changing authentication settings', 'warn')
+    return
+  }
+
+  // If no auth changes, just close the dialog
+  if (!authSettingsChanged()) {
+    hideDialog('dialog-settings')
+    return
+  }
+
+  if (!apiKey) {
+    appendLogLine('API key is required', 'error')
+    return
+  }
+
+  try {
+    const result = await window.api.configureAuth({ provider, apiKey, baseUrl, modelName })
+    if (result.ok) {
+      state.qwenAuthConfigured = true
+      appendLogLine('Authentication configured successfully', 'ok')
+      hideDialog('dialog-settings')
     } else {
       appendLogLine('Failed to configure auth: ' + result.error, 'error')
     }

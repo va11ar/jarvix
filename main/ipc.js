@@ -138,6 +138,10 @@ function registerIpcHandlers(win) {
   }))
   ipcMain.handle('auth:configure', h((config) => configureQwenAuth(config)))
   ipcMain.handle('auth:test', h((config) => testQwenAuth(config)))
+  ipcMain.handle('auth:get-settings', h(async () => {
+    const { getAuthSettings } = require('./auth')
+    return await getAuthSettings()
+  }))
 
   // ── Qwen Installation ────────────────────────────────────────────────────
   ipcMain.handle('qwen:check-installed', h(async (customPath) => {

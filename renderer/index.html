@@ -38,6 +38,9 @@
             <span>Give Feedback</span>
           </div>
           <div class="file-menu-separator"></div>
+          <div class="file-menu-item" id="file-menu-settings">
+            <span>Settings</span>
+          </div>
           <div class="file-menu-item" id="file-menu-exit">
             <span>Exit</span>
           </div>
@@ -563,6 +566,78 @@
     <div class="context-menu-item" data-action="skip-agent">Skip Agent</div>
     <div class="context-menu-item" data-action="edit-context">Edit Context</div>
     <div class="context-menu-item" data-action="kill-agent">Kill Agent</div>
+  </div>
+
+  <!-- Settings Dialog -->
+  <div class="overlay hidden" id="dialog-settings">
+    <div class="dialog settings-dialog">
+      <div class="settings-dialog-header">
+        <div class="settings-dialog-title">Settings</div>
+        <button class="settings-dialog-close" id="btn-settings-close" title="Close">✕</button>
+      </div>
+      <div class="settings-dialog-body">
+        <div class="settings-sidebar">
+          <div class="settings-sidebar-item active" data-settings-tab="default-folder">Default folder</div>
+          <div class="settings-sidebar-item" data-settings-tab="authentication">Authentication</div>
+          <div class="settings-sidebar-item" data-settings-tab="cli">CLI</div>
+        </div>
+        <div class="settings-content">
+          <!-- Default Folder Tab -->
+          <div class="settings-tab" id="settings-tab-default-folder">
+            <div class="settings-tab-content">
+              <p class="coming-soon-text">Coming Soon...</p>
+            </div>
+          </div>
+          <!-- Authentication Tab -->
+          <div class="settings-tab hidden" id="settings-tab-authentication">
+            <div class="settings-tab-content">
+              <div class="dialog-row" style="margin-bottom:16px;">
+                <label style="display:block;font-size:10px;color:var(--text-faint);margin-bottom:6px;">Provider</label>
+                <select class="dialog-input" id="settings-auth-provider" style="width:100%;background:var(--bg2);border:1px solid var(--border);color:var(--text);padding:8px;border-radius:4px;">
+                  <option value="openai">OpenAI</option>
+                  <option value="modelscope">ModelScope</option>
+                  <option value="openrouter">OpenRouter</option>
+                  <option value="alibaba">Alibaba Cloud Bailian</option>
+                  <option value="azure">Azure OpenAI</option>
+                  <option value="custom">Custom Provider</option>
+                </select>
+              </div>
+
+              <div class="dialog-row" style="margin-bottom:16px;">
+                <label style="display:block;font-size:10px;color:var(--text-faint);margin-bottom:6px;">API Key</label>
+                <input class="dialog-input" id="settings-auth-api-key" type="password" placeholder="sk-..." style="width:100%;box-sizing:border-box;">
+              </div>
+
+              <div style="margin-bottom:16px;">
+                <label style="display:block;font-size:10px;color:var(--text-faint);margin-bottom:6px;">Base URL (optional)</label>
+                <input class="dialog-input" id="settings-auth-base-url" type="text" placeholder="https://api.openai.com/v1" style="width:100%;box-sizing:border-box;">
+                <p style="color:var(--text-faint);font-size:9px;margin-top:6px;display:block;">The API endpoint URL. Auto-fills based on provider.</p>
+              </div>
+
+              <div class="dialog-row" style="margin-bottom:16px;">
+                <label style="display:block;font-size:10px;color:var(--text-faint);margin-bottom:6px;">Model Name (optional)</label>
+                <input class="dialog-input" id="settings-auth-model-name" type="text" placeholder="gpt-4, qwen3-coder-plus, etc." style="width:100%;box-sizing:border-box;">
+              </div>
+
+              <div class="dialog-row" style="margin-bottom:8px;">
+                <button class="footer-btn" id="btn-settings-auth-test" style="width:100%;">Test Connection</button>
+              </div>
+              <div id="settings-auth-test-result" style="font-size:10px;min-height:14px;"></div>
+              <p id="settings-auth-test-note" style="color:var(--text-faint);font-size:9px;margin-top:8px;display:none;">Note: Azure OpenAI requires a chat completion test which may incur minimal cost.</p>
+            </div>
+          </div>
+          <!-- CLI Tab -->
+          <div class="settings-tab hidden" id="settings-tab-cli">
+            <div class="settings-tab-content">
+              <p class="coming-soon-text">Coming Soon...</p>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="settings-dialog-footer">
+        <button class="footer-btn primary" id="btn-settings-ok">OK</button>
+      </div>
+    </div>
   </div>
 
   <script src="renderer.js"></script>

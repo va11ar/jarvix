@@ -386,4 +386,70 @@ async function testChatCompletion(baseUrl, apiKey, modelName) {
   })
 }
 
-module.exports = { validateQwenAuth, configureQwenAuth, testQwenAuth, getDefaultBaseUrl }
+/**
+ * Get current authentication settings from ~/.qwen/settings.json and ~/.qwen/.env
+ * @returns {Promise<{provider?: string, apiKeyMasked?: string, baseUrl?: string, modelName?: string, configured: boolean}>}
+ */
+async function getAuthSettings() {
+  try {
+    const settingsPath = path.join(os.homedir(), '.qwen', 'settings.json')
+    const envPath = path.join(os.homedir(), '.qwen', '.env')
+
+    // Read settings.json
+    let settings = {}
+    try {
+      const raw = await fs.readFile(settingsPath, 'utf8')
+      settings = JSON.parse(raw)
+    } catch {
+      return { configured: false }
+    }
+
+    // Read .env file for API key and base URL
+    let apiKey = ''
+    let baseUrl = ''
+    try {
+      const envRaw = await fs.readFile(envPath, 'utf8')
+      const lines = envRaw.split('\n')
+      for (const line of lines) {
+        if (line.startsWith('OPENAI_API_KEY=')) {
+          apiKey = line.substring('OPENAI_API_KEY='.length).trim()
+        } else if (line.startsWith('OPENAI_BASE_URL=')) {
+          baseUrl = line.substring('OPENAI_BASE_URL='.length).trim()
+        }
+      }
+    } catch {
+      // .env file doesn't exist
+    }
+
+    // Get provider from settings
+    const provider = settings?.security?.auth?.selectedType || 'openai'
+    const modelName = settings?.model?.name || ''
+
+    // If baseUrl not in .env, use default for provider
+    if (!baseUrl) {
+      baseUrl = getDefaultBaseUrl(provider)
+    }
+
+    // Mask API key: show first 5 and last 5 characters
+    let apiKeyMasked = ''
+    if (apiKey && apiKey.length > 10) {
+      apiKeyMasked = apiKey.substring(0, 5) + '...' + apiKey.substring(apiKey.length - 5)
+    } else if (apiKey) {
+      apiKeyMasked = '...'
+    }
+
+    return {
+      configured: !!apiKey,
+      provider,
+      apiKeyMasked,
+      apiKeyFull: apiKey, // Include full key for pre-filling (will be masked in UI)
+      baseUrl,
+      modelName,
+    }
+  } catch (e) {
+    console.error('[getAuthSettings] Error:', e.message)
+    return { configured: false }
+  }
+}
+
+module.exports = { validateQwenAuth, configureQwenAuth, testQwenAuth, getDefaultBaseUrl, getAuthSettings }

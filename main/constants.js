@@ -71,6 +71,7 @@ const IPC = {
   AUTH_CHECK: 'auth:check',
   AUTH_CONFIGURE: 'auth:configure',
   AUTH_TEST: 'auth:test',
+  AUTH_GET_SETTINGS: 'auth:get-settings',
 
   // Qwen installation
   QWEN_CHECK_INSTALLED: 'qwen:check-installed',
