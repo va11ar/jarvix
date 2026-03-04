@@ -22,32 +22,43 @@ class FilePoller extends EventEmitter {
   start() {
     if (this.intervalId) return
 
-    this.intervalId = setInterval(async () => {
-      try {
-        const stat = await fs.stat(this.filePath)
-        const newSize = stat.size
+    // Initial check immediately
+    this._checkFile()
 
-        // Only read if file has grown
-        if (newSize > this.lastSize) {
-          const content = await fs.readFile(this.filePath, 'utf8')
-          const match = this.pattern.exec(content)
-
-          if (match) {
-            const fullMatch = match[0]
-            // Only emit if it's a new match (different from last)
-            if (fullMatch !== this.lastMatch) {
-              this.lastMatch = fullMatch
-              this.emit('match', fullMatch, match)
-            }
-          }
-
-          this.lastSize = newSize
-        }
-      } catch (e) {
-        // File doesn't exist yet or read error — continue polling
-        this.emit('error', e)
-      }
+    this.intervalId = setInterval(() => {
+      this._checkFile()
     }, this.intervalMs)
+  }
+
+  /**
+   * Check file for changes and pattern match
+   * @private
+   */
+  async _checkFile() {
+    try {
+      const stat = await fs.stat(this.filePath)
+      const newSize = stat.size
+
+      // Read if file has grown OR if we haven't read it yet (initial check)
+      if (newSize > this.lastSize || this.lastSize === 0) {
+        const content = await fs.readFile(this.filePath, 'utf8')
+        const match = this.pattern.exec(content)
+
+        if (match) {
+          const fullMatch = match[0]
+          // Only emit if it's a new match (different from last)
+          if (fullMatch !== this.lastMatch) {
+            this.lastMatch = fullMatch
+            this.emit('match', fullMatch, match)
+          }
+        }
+
+        this.lastSize = newSize
+      }
+    } catch (e) {
+      // File doesn't exist yet or read error — continue polling
+      this.emit('error', e)
+    }
   }
 
   /**

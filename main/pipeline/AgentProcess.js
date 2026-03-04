@@ -10,12 +10,13 @@ const ActivityLog = require('./ActivityLog')
 const PIPELINE_STATUS_REGEX = /^PIPELINE_STATUS:\s*(DONE|ERROR)\s*\|?\s*(ISSUES:\s*(true|false)|REASON:\s*.+)?$/m
 
 class AgentProcess {
-  constructor(agent, projectPath, outputFilePath, win, useSandbox = false) {
+  constructor(agent, projectPath, outputFilePath, win, useSandbox = false, oauthEnabled = false) {
     this.agent = agent
     this.projectPath = projectPath
     this.outputFilePath = outputFilePath
     this.win = win
     this.useSandbox = useSandbox
+    this.oauthEnabled = oauthEnabled
     this.process = null
     this.poller = null
     this.timeoutId = null
@@ -40,7 +41,13 @@ class AgentProcess {
       // Construct the prompt by reading all files in agent.reads
       const promptParts = [this.agent.prompt]
       for (const readFile of this.agent.reads) {
-        const fullPath = path.join(this.projectPath, readFile)
+        // Agent read files may or may not have Context/ prefix - handle both cases
+        let fullPath
+        if (readFile.startsWith('Context/')) {
+          fullPath = path.join(this.projectPath, readFile)
+        } else {
+          fullPath = path.join(this.projectPath, 'Context', readFile)
+        }
         try {
           const content = await fs.readFile(fullPath, 'utf8')
           promptParts.push(`\n\n@${readFile}:\n${content}`)
@@ -52,8 +59,10 @@ class AgentProcess {
 
       // Append the injected footer
       const outputFileName = path.basename(this.outputFilePath)
-      const outputRelativePath = `../Context/${outputFileName}`
-      promptParts.push(`\n\nYou must write your complete output to \`${outputRelativePath}\`. Use your file writing tools to do this — do not print your output to the terminal.\n\nThe very last line of the file you write must be exactly one of:\n\n\`PIPELINE_STATUS: DONE | ISSUES: false\` — task complete, no issues found\n\n\`PIPELINE_STATUS: DONE | ISSUES: true\` — task complete, issues found (review agents only)\n\n\`PIPELINE_STATUS: ERROR | REASON: <brief description>\` — task could not be completed\n\nDo not omit this line. Do not paraphrase it. Do not add anything after it.`)
+      // Output path is relative to Qwen's cwd (projectPath), so just Context/filename
+      const outputRelativePath = `Context/${outputFileName}`
+      const footerPrompt = `\n\nYou must write your complete output to \`${outputRelativePath}\`. Use your file writing tools to do this — do not print your output to the terminal.\n\nThe very last line of the file you write must be exactly one of:\n\n\`PIPELINE_STATUS: DONE | ISSUES: false\` — task complete, no issues found\n\n\`PIPELINE_STATUS: DONE | ISSUES: true\` — task complete, issues found (review agents only)\n\n\`PIPELINE_STATUS: ERROR | REASON: <brief description>\` — task could not be completed\n\nDo not omit this line. Do not paraphrase it. Do not add anything after it.`
+      promptParts.push(footerPrompt)
 
       const fullPrompt = promptParts.join('')
 
@@ -61,16 +70,19 @@ class AgentProcess {
       // useSandbox: spawn with --approval-mode yolo (per §6.2)
       const approvalMode = this.useSandbox ? 'yolo' : 'auto-edit'
 
+      // Note: Removed --output-format stream-json as it requires a TTY and causes hangs in detached mode
       const qwenArgs = [
         '-p',
         fullPrompt,
         '--approval-mode',
         approvalMode,
-        '--output-format',
-        'stream-json',
-        '--auth-type',
-        'openai',
       ]
+      
+      // Only add --auth-type if OAuth is not enabled
+      // When OAuth is enabled, Qwen CLI uses credentials from ~/.qwen/.env
+      if (!this.oauthEnabled) {
+        qwenArgs.push('--auth-type', 'openai')
+      }
 
       this.process = spawn('qwen', qwenArgs, {
         cwd: this.projectPath,
@@ -81,7 +93,6 @@ class AgentProcess {
 
       // Handle stdout for errors
       this.process.stdout.on('data', (data) => {
-        // Log stdout for debugging — pipeline status comes from file polling
         const lines = data.toString().split('\n').filter(Boolean)
         for (const line of lines) {
           try {
@@ -97,7 +108,7 @@ class AgentProcess {
 
       // Handle stderr
       this.process.stderr.on('data', (data) => {
-        ActivityLog.append(this.projectPath, `Agent stderr: ${data.toString().trim()}`, 'warn')
+        ActivityLog.append(this.projectPath, `Agent stderr: ${data.toString().trim()}`, 'qwen')
       })
 
       // Handle process exit

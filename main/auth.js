@@ -119,8 +119,6 @@ async function testQwenAuth(config) {
   const modelName = config.modelName
   const provider = config.provider
 
-  console.log('[AUTH TEST] Provider:', provider, 'Model:', modelName, 'URL:', baseUrl)
-
   // Require API key
   if (!apiKey) {
     return { ok: false, error: 'API key is required' }
@@ -132,7 +130,6 @@ async function testQwenAuth(config) {
   // Try /models endpoint first (free, no cost)
   if (!requiresChatTest.includes(provider)) {
     const modelsResult = await testModelsEndpoint(baseUrl, apiKey, provider)
-    console.log('[AUTH] Models result:', modelsResult.ok, modelsResult.message)
     if (modelsResult.ok) {
       // Check if the specified model exists in the list
       if (modelName && modelsResult.models && modelsResult.models.length > 0) {
@@ -194,15 +191,11 @@ async function testQwenAuth(config) {
 async function testModelsEndpoint(baseUrl, apiKey, provider) {
   return new Promise((resolve) => {
     let url
-    console.log('[testModelsEndpoint] Input baseUrl:', baseUrl)
-    console.log('[testModelsEndpoint] Provider:', provider)
     try {
       // Normalize baseUrl to end with '/' for correct URL resolution
       const normalizedBase = baseUrl.endsWith('/') ? baseUrl : baseUrl + '/'
       url = new URL('models', normalizedBase)
-      console.log('[testModelsEndpoint] Constructed URL:', url.href)
     } catch (e) {
-      console.log('[testModelsEndpoint] URL construction error:', e.message)
       resolve({ ok: false, error: 'Invalid base URL format' })
       return
     }
@@ -230,37 +223,27 @@ async function testModelsEndpoint(baseUrl, apiKey, provider) {
       timeout: 10000,
     }
 
-    console.log('[MODELS] Request:', options.method, url.href)
-    console.log('[MODELS] Headers:', JSON.stringify(headers, null, 2))
-
     const req = lib.request(options, (res) => {
       let data = ''
       res.on('data', (chunk) => { data += chunk })
       res.on('end', () => {
-        console.log('[MODELS] Status:', res.statusCode, 'Content-Type:', res.headers['content-type'])
-        console.log('[MODELS] Response (first 300 chars):', data.substring(0, 300))
-        console.log('[MODELS] Full headers:', JSON.stringify(res.headers, null, 2))
-        
         // Check if response is HTML (indicates wrong URL or error page)
         const contentType = res.headers['content-type'] || ''
         if (contentType.includes('text/html') || data.trim().startsWith('<!DOCTYPE') || data.trim().startsWith('<html')) {
-          console.log('[MODELS] HTML response detected - likely wrong endpoint')
           resolve({ ok: false, error: 'API returned HTML instead of JSON - check base URL' })
           return
         }
-        
+
         if (res.statusCode >= 200 && res.statusCode < 300) {
           try {
             const response = JSON.parse(data)
             const models = response.data || response.models || []
-            console.log('[MODELS] Count:', models.length)
             resolve({
               ok: true,
               message: `Connection successful - ${models.length} models available`,
               models: models
             })
           } catch (e) {
-            console.log('[MODELS] Parse error:', e.message)
             resolve({ ok: false, error: 'Failed to parse API response' })
           }
         } else {
@@ -335,37 +318,29 @@ async function testChatCompletion(baseUrl, apiKey, modelName) {
       let data = ''
       res.on('data', (chunk) => { data += chunk })
       res.on('end', () => {
-        console.log('[CHAT TEST] Status:', res.statusCode, 'Content-Type:', res.headers['content-type'])
-        console.log('[CHAT TEST] Response (first 300 chars):', data.substring(0, 300))
-        
         // Check if response is HTML (indicates wrong URL or error page)
         const contentType = res.headers['content-type'] || ''
         if (contentType.includes('text/html') || data.trim().startsWith('<!DOCTYPE') || data.trim().startsWith('<html')) {
-          console.log('[CHAT TEST] HTML response detected - likely wrong endpoint')
           resolve({ ok: false, error: 'API returned HTML instead of JSON - check base URL' })
           return
         }
-        
+
         if (res.statusCode >= 200 && res.statusCode < 300) {
           try {
             const response = JSON.parse(data)
             if (response.choices && response.choices.length > 0) {
               resolve({ ok: true, message: `Connection successful - ${modelName} responded` })
             } else {
-              console.log('[CHAT TEST] Empty choices')
               resolve({ ok: false, error: 'API returned empty response' })
             }
           } catch (e) {
-            console.log('[CHAT TEST] Parse error:', e.message)
             resolve({ ok: false, error: 'Failed to parse response' })
           }
         } else {
           try {
             const error = JSON.parse(data)
-            console.log('[CHAT TEST] API error:', error.error?.message)
             resolve({ ok: false, error: `API returned error: ${error.error?.message || data}` })
           } catch {
-            console.log('[CHAT TEST] HTTP error:', res.statusCode)
             resolve({ ok: false, error: `API returned HTTP ${res.statusCode}` })
           }
         }
@@ -452,4 +427,75 @@ async function getAuthSettings() {
   }
 }
 
-module.exports = { validateQwenAuth, configureQwenAuth, testQwenAuth, getDefaultBaseUrl, getAuthSettings }
+module.exports = { validateQwenAuth, configureQwenAuth, testQwenAuth, getDefaultBaseUrl, getAuthSettings, isOAuthEnabled, setOAuthEnabled, restoreQwenSettingsToOAuthDefaults }
+
+/**
+ * Check if OAuth is enabled in app settings
+ * @returns {Promise<boolean>}
+ */
+async function isOAuthEnabled() {
+  try {
+    const Settings = require('./settings')
+    const settings = await Settings.load()
+    return !!settings.oauthEnabled
+  } catch (e) {
+    console.error('[isOAuthEnabled] Error:', e.message)
+    return false
+  }
+}
+
+/**
+ * Enable or disable OAuth mode in app settings
+ * @param {boolean} enabled - Whether OAuth should be enabled
+ * @returns {Promise<{ok: boolean, error?: string}>}
+ */
+async function setOAuthEnabled(enabled) {
+  try {
+    const Settings = require('./settings')
+    const settings = await Settings.load()
+    settings.oauthEnabled = enabled
+    return await Settings.save(settings)
+  } catch (e) {
+    console.error('[setOAuthEnabled] Error:', e.message)
+    return { error: e.message }
+  }
+}
+
+/**
+ * Restore ~/.qwen/settings.json to OAuth defaults
+ * This writes the default Qwen OAuth configuration
+ * @returns {Promise<{ok: boolean, error?: string}>}
+ */
+async function restoreQwenSettingsToOAuthDefaults() {
+  try {
+    const fs = require('fs/promises')
+    const path = require('path')
+    const os = require('os')
+    
+    const qwenDir = path.join(os.homedir(), '.qwen')
+    const settingsPath = path.join(qwenDir, 'settings.json')
+    
+    // Ensure ~/.qwen directory exists
+    await fs.mkdir(qwenDir, { recursive: true })
+    
+    // Write default OAuth settings
+    const oauthDefaults = {
+      model: {
+        name: 'coder-model'
+      },
+      '$version': 3,
+      security: {
+        auth: {
+          selectedType: 'qwen-oauth'
+        }
+      }
+    }
+    
+    await fs.writeFile(settingsPath, JSON.stringify(oauthDefaults, null, 2), 'utf8')
+    
+    return { ok: true }
+  } catch (e) {
+    console.error('[restoreQwenSettingsToOAuthDefaults] Error:', e.message)
+    return { error: e.message }
+  }
+}

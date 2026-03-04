@@ -30,6 +30,7 @@ const state = {
 
   // Auth state
   qwenAuthConfigured: true, // Assume true until proven otherwise
+  oauthEnabled: false, // OAuth mode enabled
 
   // New Project Dialog state
   npStep: 1,
@@ -941,13 +942,6 @@ async function assignReviewTarget(reviewerAgentId, reviewerAgentName, targetAgen
 
     // Update the pipeline step with review_target and loop config
     const reviewerStep = state.pipelineSteps.find(s => s.agent_id === reviewerAgentId)
-    console.log('assignReviewTarget debug:', {
-      reviewerAgentId,
-      targetAgentId,
-      reviewerStepFound: !!reviewerStep,
-      reviewerStepBefore: reviewerStep ? { ...reviewerStep } : null,
-      reviewerAgentLoop: reviewerAgent?.loop
-    })
     if (reviewerStep) {
       reviewerStep.review_target = targetAgentId
       // Copy loop config from agent to step
@@ -957,7 +951,6 @@ async function assignReviewTarget(reviewerAgentId, reviewerAgentName, targetAgen
         // Default to revision loop with 5 max iterations
         reviewerStep.loop = { type: 'revision', max_revision_loops: 5 }
       }
-      console.log('reviewerStep after update:', reviewerStep)
     }
 
     // Reorder agents: move reviewer agent to be right after target agent
@@ -1002,12 +995,6 @@ async function reorderAgentsAfterTarget(targetAgentId, reviewerAgentId) {
   // Remove reviewer from current position
   const [reviewerStep] = state.pipelineSteps.splice(reviewerIndex, 1)
 
-  console.log('reorderAgentsAfterTarget debug:', {
-    reviewerStep,
-    hasReviewTarget: !!reviewerStep.review_target,
-    hasLoop: !!reviewerStep.loop
-  })
-
   // If reviewer was before target, targetIndex shifted down by 1
   const adjustedTargetIndex = reviewerIndex < targetIndex ? targetIndex - 1 : targetIndex
 
@@ -1017,12 +1004,6 @@ async function reorderAgentsAfterTarget(targetAgentId, reviewerAgentId) {
 
   // Save updated pipeline to project JSON
   if (state.currentProject) {
-    console.log('Calling updatePipelineSteps with steps:', state.pipelineSteps.map(s => ({
-      agent_id: s.agent_id,
-      agent_name: s.agent_name,
-      review_target: s.review_target,
-      loop: s.loop
-    })))
     try {
       await window.api.updatePipelineSteps(state.pipelineSteps, state.currentProject.projectPath)
       appendLogLine(`Reordered pipeline: "${reviewerStep.agent_name}" moved to position ${newIndex + 1}`, 'info')
@@ -1075,6 +1056,7 @@ function handlePipelineStatus(data) {
 
   // Handle review-loop state
   if (data.state === 'review-loop' && data.loopType) {
+    state.revisionLoopCounts[data.agentId] = data.loopCount
     updateReviewPips(data.agentId, data.loopCount, data.maxLoops, data.loopType)
   }
 
@@ -1087,7 +1069,18 @@ function handlePipelineStatus(data) {
   // Handle max-loops-reached state
   if (data.state === 'max-loops-reached') {
     const agent = state.agents.find(a => a.id === data.agentId)
+    // Update loop count for display
+    if (data.loopCount !== undefined) {
+      state.revisionLoopCounts[data.agentId] = data.loopCount
+    }
     appendLogLine(`Max review loops reached for ${agent?.name || 'Unknown'}`, 'warn')
+  }
+
+  // Re-enable start button when pipeline is no longer running
+  // (button is disabled in handleStart() to prevent double-click)
+  const btnStart = document.getElementById('btn-start')
+  if (btnStart) {
+    btnStart.disabled = (state.pipelineState === 'running')
   }
 
   updateTitlebarStatus()
@@ -1946,7 +1939,19 @@ async function updateDetailPanel(libraryAgent = null) {
       // Hide progress bar for library agents
       document.getElementById('progress-fill').style.width = '0%'
       document.getElementById('progress-text').textContent = 'Step 0 of 0'
-      document.getElementById('review-section').classList.add('hidden')
+      
+      // Review section - show if agent is a reviewer (has loop.type)
+      const reviewSection = document.getElementById('review-section')
+      const isReviewer = agent.loop && agent.loop.type
+      if (isReviewer) {
+        reviewSection.classList.remove('hidden')
+        // Update pips with current loop count (0 for library agents not in pipeline)
+        const loopCount = 0
+        const maxLoops = agent.loop?.max_revision_loops || 5
+        updateReviewPips(agent.id, loopCount, maxLoops, agent.loop.type)
+      } else {
+        reviewSection.classList.add('hidden')
+      }
       return
     }
   }
@@ -2003,8 +2008,18 @@ async function updateDetailPanel(libraryAgent = null) {
   document.getElementById('progress-fill').style.width = `${pct}%`
   document.getElementById('progress-text').textContent = `Step ${Math.min(completed + 1, total)} of ${total}`
 
-  // Review section (hidden by default for now)
-  document.getElementById('review-section').classList.add('hidden')
+  // Review section - show if agent is a reviewer (has loop.type)
+  const reviewSection = document.getElementById('review-section')
+  const isReviewer = agent?.loop && agent.loop.type
+  if (isReviewer) {
+    reviewSection.classList.remove('hidden')
+    // Update pips with current loop count
+    const loopCount = state.revisionLoopCounts?.[agent.id] ?? 0
+    const maxLoops = agent.loop?.max_revision_loops || 5
+    updateReviewPips(agent.id, loopCount, maxLoops, agent.loop.type)
+  } else {
+    reviewSection.classList.add('hidden')
+  }
 
   // Update Skip Agent button text based on selected agent status
   updateSkipAgentButtonText()
@@ -2126,19 +2141,56 @@ async function handleStart() {
     return
   }
 
+  // Disable start button immediately to prevent double-click race condition
+  const btnStart = document.getElementById('btn-start')
+  if (btnStart) btnStart.disabled = true
+
+  // Check if pipeline has run before and show dialog if needed
+  // This check happens before any other validation (auth, etc.)
+  try {
+    const hasRunResult = await window.api.pipelineHasRunBefore(state.currentProject.projectPath)
+    if (hasRunResult.hasRunBefore) {
+      // Show the "not first run" dialog and wait for user response
+      const userChoice = await showNotFirstRunDialog()
+      if (userChoice === 'cancel') {
+        // User clicked Cancel - stop everything
+        if (btnStart) btnStart.disabled = false
+        return
+      }
+      if (userChoice === 'yes') {
+        // User wants to start fresh - reset the pipeline
+        const resetResult = await window.api.resetPipeline(state.currentProject.projectPath)
+        if (resetResult.error) {
+          appendLogLine('Failed to reset pipeline: ' + resetResult.error, 'error')
+          if (btnStart) btnStart.disabled = false
+          return
+        }
+        appendLogLine('Pipeline reset - starting fresh run', 'info')
+      }
+      // If userChoice === 'no', continue with existing context (do nothing special)
+    }
+  } catch (e) {
+    appendLogLine('Failed to check pipeline run history: ' + e.message, 'error')
+    if (btnStart) btnStart.disabled = false
+    return
+  }
+
   // Check auth before starting pipeline
   try {
     const authResult = await window.api.checkAuth()
     if (!authResult.configured) {
       showDialog('dialog-auth-warning')
+      if (btnStart) btnStart.disabled = false
       return
     }
   } catch (e) {
     appendLogLine('Failed to check auth: ' + e.message, 'error')
+    if (btnStart) btnStart.disabled = false
     return
   }
 
   await startPipeline()
+  // Note: btnStart will be re-enabled by handlePipelineStatus() when state updates
 }
 
 async function handleAbort() {
@@ -2358,12 +2410,6 @@ async function loadProject(projectPath) {
         }
       }
     })
-    console.log('Pipeline steps after migration:', state.pipelineSteps.map(s => ({
-      agent_id: s.agent_id,
-      agent_name: s.agent_name,
-      review_target: s.review_target,
-      loop: s.loop
-    })))
 
     state.currentStepIndex = -1
     state.pipelineState = 'idle'
@@ -3186,6 +3232,22 @@ function wireNewProjectDialog() {
     }
   })
 
+  // Not first run dialog buttons
+  document.getElementById('btn-not-first-run-cancel').addEventListener('click', () => {
+    hideDialog('dialog-not-first-run')
+    resolveNotFirstRunDialog('cancel')
+  })
+
+  document.getElementById('btn-not-first-run-no').addEventListener('click', () => {
+    hideDialog('dialog-not-first-run')
+    resolveNotFirstRunDialog('no')
+  })
+
+  document.getElementById('btn-not-first-run-yes').addEventListener('click', () => {
+    hideDialog('dialog-not-first-run')
+    resolveNotFirstRunDialog('yes')
+  })
+
   // Auth warning dialog
   document.getElementById('btn-auth-warning-cancel').addEventListener('click', () => {
     hideDialog('dialog-auth-warning')
@@ -3207,6 +3269,18 @@ function wireNewProjectDialog() {
 
   // Provider dropdown - update base URL when provider changes
   document.getElementById('auth-provider').addEventListener('change', handleProviderChange)
+
+  // OAuth checkbox - toggle field states
+  document.getElementById('auth-oauth-checkbox').addEventListener('change', () => {
+    updateOAuthFields('auth')
+    // When OAuth is enabled, enable Save button; when disabled, require test
+    const oauthEnabled = document.getElementById('auth-oauth-checkbox').checked
+    if (oauthEnabled) {
+      setAuthSaveEnabled(true)
+    } else {
+      setAuthSaveEnabled(false)
+    }
+  })
 
   // Disable Save button when any input field changes (require re-test)
   document.getElementById('auth-api-key').addEventListener('input', () => setAuthSaveEnabled(false))
@@ -3246,6 +3320,20 @@ function wireNewProjectDialog() {
   document.getElementById('settings-auth-model-name').addEventListener('input', () => {
     settingsAuthTestPassed = false
     updateSettingsOkButton(false)
+  })
+  
+  // OAuth checkbox for settings dialog
+  document.getElementById('settings-auth-oauth-checkbox').addEventListener('change', () => {
+    updateOAuthFields('settings-auth')
+    // When OAuth is enabled, enable OK button; when disabled, require test
+    const oauthEnabled = document.getElementById('settings-auth-oauth-checkbox').checked
+    if (oauthEnabled) {
+      settingsAuthTestPassed = true
+      updateSettingsOkButton(true)
+    } else {
+      settingsAuthTestPassed = false
+      updateSettingsOkButton(false)
+    }
   })
 }
 
@@ -3290,6 +3378,32 @@ async function handleCancelChanges() {
   }
 }
 
+// ─── Not First Run Dialog ───────────────────────────────────────────────────
+
+let notFirstRunDialogResolve = null
+
+/**
+ * Show the "not first run" dialog and return user's choice
+ * @returns {Promise<'yes'|'no'|'cancel'>}
+ */
+function showNotFirstRunDialog() {
+  return new Promise((resolve) => {
+    notFirstRunDialogResolve = resolve
+    showDialog('dialog-not-first-run')
+  })
+}
+
+/**
+ * Resolve the dialog promise with user's choice
+ * @param {'yes'|'no'|'cancel'} choice - User's choice
+ */
+function resolveNotFirstRunDialog(choice) {
+  if (notFirstRunDialogResolve) {
+    notFirstRunDialogResolve(choice)
+    notFirstRunDialogResolve = null
+  }
+}
+
 // ─── Start Pipeline ─────────────────────────────────────────────────────────
 
 // Default base URLs for each provider
@@ -3302,8 +3416,17 @@ const PROVIDER_BASE_URLS = {
   'custom': '',
 }
 
-function showAuthSetupDialog() {
+async function showAuthSetupDialog() {
   showDialog('dialog-auth-setup')
+  
+  // Load OAuth state
+  try {
+    const oauthResult = await window.api.isOAuthEnabled()
+    state.oauthEnabled = oauthResult.enabled || false
+  } catch (e) {
+    state.oauthEnabled = false
+  }
+  
   // Reset form
   document.getElementById('auth-provider').value = 'openai'
   document.getElementById('auth-api-key').value = ''
@@ -3311,12 +3434,51 @@ function showAuthSetupDialog() {
   document.getElementById('auth-model-name').value = ''
   document.getElementById('auth-test-result').textContent = ''
   document.getElementById('auth-test-result').className = ''
-  // Disable Save button until test passes
-  document.getElementById('btn-auth-setup-save').disabled = true
+  
+  // Set OAuth checkbox state
+  const oauthCheckbox = document.getElementById('auth-oauth-checkbox')
+  const oauthMessage = document.getElementById('auth-oauth-message')
+  oauthCheckbox.checked = state.oauthEnabled
+  
+  // Update UI based on OAuth state
+  updateOAuthFields('auth')
+  
+  // Disable Save button until test passes (if not OAuth)
+  if (!state.oauthEnabled) {
+    document.getElementById('btn-auth-setup-save').disabled = true
+  } else {
+    document.getElementById('btn-auth-setup-save').disabled = false
+  }
 }
 
 function setAuthSaveEnabled(enabled) {
   document.getElementById('btn-auth-setup-save').disabled = !enabled
+}
+
+function updateOAuthFields(prefix) {
+  const oauthCheckbox = document.getElementById(`${prefix}-oauth-checkbox`)
+  const oauthMessage = document.getElementById(`${prefix}-oauth-message`)
+  const providerSelect = document.getElementById(`${prefix}-provider`)
+  const apiKeyInput = document.getElementById(`${prefix}-api-key`)
+  const baseUrlInput = document.getElementById(`${prefix}-base-url`)
+  const modelNameInput = document.getElementById(`${prefix}-model-name`)
+  const testButton = document.getElementById(`${prefix}-auth-test`)
+  
+  if (!oauthCheckbox) return
+  
+  const isOAuthEnabled = oauthCheckbox.checked
+  
+  // Show/hide message
+  if (oauthMessage) {
+    oauthMessage.style.display = isOAuthEnabled ? 'block' : 'none'
+  }
+  
+  // Disable/enable fields
+  if (providerSelect) providerSelect.disabled = isOAuthEnabled
+  if (apiKeyInput) apiKeyInput.disabled = isOAuthEnabled
+  if (baseUrlInput) baseUrlInput.disabled = isOAuthEnabled
+  if (modelNameInput) modelNameInput.disabled = isOAuthEnabled
+  if (testButton) testButton.disabled = isOAuthEnabled
 }
 
 function handleProviderChange() {
@@ -3379,6 +3541,35 @@ async function handleAuthTest() {
 }
 
 async function handleAuthSave() {
+  const oauthEnabled = document.getElementById('auth-oauth-checkbox').checked
+
+  // Save OAuth state
+  try {
+    await window.api.setOAuthEnabled(oauthEnabled)
+    state.oauthEnabled = oauthEnabled
+  } catch (e) {
+    appendLogLine('Failed to save OAuth state: ' + e.message, 'error')
+  }
+
+  // If OAuth is enabled, restore ~/.qwen/settings.json to OAuth defaults
+  if (oauthEnabled) {
+    try {
+      const result = await window.api.restoreOAuthDefaults()
+      if (result.ok) {
+        state.qwenAuthConfigured = true
+        appendLogLine('OAuth mode enabled. Qwen settings restored to OAuth defaults.', 'info')
+        hideDialog('dialog-auth-setup')
+        return
+      } else {
+        appendLogLine('Failed to restore OAuth defaults: ' + (result.error || 'Unknown error'), 'error')
+      }
+    } catch (e) {
+      appendLogLine('Failed to restore OAuth defaults: ' + e.message, 'error')
+    }
+    return
+  }
+
+  // OAuth is disabled - configure API key auth
   const provider = document.getElementById('auth-provider').value
   const apiKey = document.getElementById('auth-api-key').value
   const baseUrl = document.getElementById('auth-base-url').value
@@ -3429,20 +3620,38 @@ async function loadAuthSettings() {
   try {
     const result = await window.api.getAuthSettings()
     
+    // Load OAuth state
+    try {
+      const oauthResult = await window.api.isOAuthEnabled()
+      state.oauthEnabled = oauthResult.enabled || false
+    } catch (e) {
+      state.oauthEnabled = false
+    }
+
     // Store original values for change detection
     settingsAuthOriginal = {
       provider: result.provider || 'openai',
       apiKey: result.apiKeyFull || '',
       baseUrl: result.baseUrl || PROVIDER_BASE_URLS[result.provider || 'openai'] || PROVIDER_BASE_URLS.openai,
       modelName: result.modelName || '',
+      oauthEnabled: state.oauthEnabled,
     }
-    
+
     // Populate form fields
     document.getElementById('settings-auth-provider').value = settingsAuthOriginal.provider
     document.getElementById('settings-auth-api-key').value = settingsAuthOriginal.apiKey
     document.getElementById('settings-auth-base-url').value = settingsAuthOriginal.baseUrl
     document.getElementById('settings-auth-model-name').value = settingsAuthOriginal.modelName
     
+    // Set OAuth checkbox state
+    const oauthCheckbox = document.getElementById('settings-auth-oauth-checkbox')
+    if (oauthCheckbox) {
+      oauthCheckbox.checked = state.oauthEnabled
+    }
+    
+    // Update UI based on OAuth state
+    updateOAuthFields('settings-auth')
+
     // Show Azure note if applicable
     const noteEl = document.getElementById('settings-auth-test-note')
     noteEl.style.display = (settingsAuthOriginal.provider === 'azure') ? 'block' : 'none'
@@ -3454,6 +3663,7 @@ async function loadAuthSettings() {
       apiKey: '',
       baseUrl: PROVIDER_BASE_URLS.openai,
       modelName: '',
+      oauthEnabled: false,
     }
     document.getElementById('settings-auth-provider').value = 'openai'
     document.getElementById('settings-auth-api-key').value = ''
@@ -3484,17 +3694,19 @@ function switchSettingsTab(tabId) {
  */
 function authSettingsChanged() {
   if (!settingsAuthOriginal) return false
-  
+
   const currentProvider = document.getElementById('settings-auth-provider').value
   const currentApiKey = document.getElementById('settings-auth-api-key').value
   const currentBaseUrl = document.getElementById('settings-auth-base-url').value
   const currentModelName = document.getElementById('settings-auth-model-name').value
-  
+  const currentOAuthEnabled = document.getElementById('settings-auth-oauth-checkbox')?.checked || false
+
   return (
     currentProvider !== settingsAuthOriginal.provider ||
     currentApiKey !== settingsAuthOriginal.apiKey ||
     currentBaseUrl !== settingsAuthOriginal.baseUrl ||
-    currentModelName !== settingsAuthOriginal.modelName
+    currentModelName !== settingsAuthOriginal.modelName ||
+    currentOAuthEnabled !== settingsAuthOriginal.oauthEnabled
   )
 }
 
@@ -3584,11 +3796,39 @@ async function handleSettingsAuthTest() {
 }
 
 async function handleSettingsSave() {
+  const oauthEnabled = document.getElementById('settings-auth-oauth-checkbox').checked
   const provider = document.getElementById('settings-auth-provider').value
   const apiKey = document.getElementById('settings-auth-api-key').value
   const baseUrl = document.getElementById('settings-auth-base-url').value
   const modelName = document.getElementById('settings-auth-model-name').value
 
+  // Save OAuth state
+  try {
+    await window.api.setOAuthEnabled(oauthEnabled)
+    state.oauthEnabled = oauthEnabled
+  } catch (e) {
+    appendLogLine('Failed to save OAuth state: ' + e.message, 'error')
+  }
+
+  // If OAuth is enabled, restore ~/.qwen/settings.json to OAuth defaults
+  if (oauthEnabled) {
+    try {
+      const result = await window.api.restoreOAuthDefaults()
+      if (result.ok) {
+        state.qwenAuthConfigured = true
+        appendLogLine('OAuth mode enabled. Qwen settings restored to OAuth defaults.', 'info')
+        hideDialog('dialog-settings')
+        return
+      } else {
+        appendLogLine('Failed to restore OAuth defaults: ' + (result.error || 'Unknown error'), 'error')
+      }
+    } catch (e) {
+      appendLogLine('Failed to restore OAuth defaults: ' + e.message, 'error')
+    }
+    return
+  }
+
+  // OAuth is disabled - configure API key auth
   // If auth settings changed, require test first
   if (authSettingsChanged() && !settingsAuthTestPassed) {
     appendLogLine('Please test connection after changing authentication settings', 'warn')

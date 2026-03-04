@@ -450,6 +450,16 @@
           <input class="dialog-input" id="auth-model-name" type="text" placeholder="gpt-4, qwen3-coder-plus, etc." style="width:100%;box-sizing:border-box;">
         </div>
 
+        <div class="dialog-row" style="margin-bottom:16px;">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+            <input type="checkbox" id="auth-oauth-checkbox" style="width:16px;height:16px;">
+            <span style="font-size:10px;color:var(--text);">Use Qwen's OAuth</span>
+          </label>
+          <p id="auth-oauth-message" style="color:var(--text-faint);font-size:9px;margin-top:8px;display:none;line-height:1.5;">
+            OAuth requires Qwen CLI to be pre-authenticated. Please launch Qwen at least once before starting the pipeline to complete authentication. If not pre-authenticated, the agent may hang.
+          </p>
+        </div>
+
         <div class="dialog-row" style="margin-bottom:8px;">
           <button class="footer-btn" id="btn-auth-test" style="width:100%;">Test Connection</button>
         </div>
@@ -558,6 +568,28 @@
     </div>
   </div>
 
+  <!-- Not First Run Dialog -->
+  <div class="overlay hidden" id="dialog-not-first-run">
+    <div class="dialog" style="width:520px;">
+      <div class="dialog-header">
+        <div class="dialog-title">Pipeline Has Run Before</div>
+      </div>
+      <div class="dialog-body" style="padding:16px;">
+        <p style="color:var(--text);margin-bottom:12px;font-size:13px;">
+          This is not the first time the pipeline was started. Do you want to start fresh?
+        </p>
+        <p style="color:var(--text-faint);font-size:11px;margin-bottom:8px;line-height:1.6;">
+          Note that starting fresh will mean all agents are reset to their default state and all context files will be removed.
+        </p>
+      </div>
+      <div class="dialog-footer">
+        <button class="footer-btn" id="btn-not-first-run-cancel">Cancel</button>
+        <button class="footer-btn" id="btn-not-first-run-no">No</button>
+        <button class="footer-btn primary" id="btn-not-first-run-yes">Yes</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Agent Context Menu -->
   <div class="context-menu hidden" id="agent-context-menu">
     <div class="context-menu-item" data-action="assign-review-target">Assign review target</div>
@@ -617,6 +649,16 @@
               <div class="dialog-row" style="margin-bottom:16px;">
                 <label style="display:block;font-size:10px;color:var(--text-faint);margin-bottom:6px;">Model Name (optional)</label>
                 <input class="dialog-input" id="settings-auth-model-name" type="text" placeholder="gpt-4, qwen3-coder-plus, etc." style="width:100%;box-sizing:border-box;">
+              </div>
+
+              <div class="dialog-row" style="margin-bottom:16px;">
+                <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                  <input type="checkbox" id="settings-auth-oauth-checkbox" style="width:16px;height:16px;">
+                  <span style="font-size:10px;color:var(--text);">Use Qwen's OAuth</span>
+                </label>
+                <p id="settings-auth-oauth-message" style="color:var(--text-faint);font-size:9px;margin-top:8px;display:none;line-height:1.5;">
+                  OAuth requires Qwen CLI to be pre-authenticated. Please launch Qwen at least once before starting the pipeline to complete authentication. If not pre-authenticated, the agent may hang.
+                </p>
               </div>
 
               <div class="dialog-row" style="margin-bottom:8px;">

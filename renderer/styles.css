@@ -22,6 +22,8 @@
   --yellow-dim: #4a3e28;
   --amber:      #6b9ab8;
   --amber-dim:  #1e3348;
+  --orange:     #d48a5a;
+  --orange-dim: #4a2f1e;
   --select-source-border:   #c4a050;
   --select-source-dim:      #332a14;
   --select-eligible-border: #7aab6a;
@@ -976,6 +978,7 @@ html, body {
 .log-line.warn  .log-msg { color: var(--amber); }
 .log-line.error .log-msg { color: var(--red); }
 .log-line.start .log-msg { color: var(--accent); }
+.log-line.qwen  .log-msg { color: var(--orange); }
 
 /* ─── STATUS BAR ────────────────────────────────────────── */
 #statusbar {
@@ -1134,6 +1137,20 @@ html, body {
 .dialog-input:focus { border-color: var(--accent); }
 .dialog-input::placeholder { color: var(--text-faint); }
 .dialog-input[readonly] { color: var(--text-dim); cursor: default; }
+.dialog-input:disabled { 
+  background: var(--bg2); 
+  color: var(--text-dim); 
+  border-color: var(--border);
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+select:disabled {
+  background: var(--bg2); 
+  color: var(--text-dim); 
+  border-color: var(--border);
+  cursor: not-allowed;
+  opacity: 0.6;
+}
 
 .dialog-input textarea {
   resize: vertical;

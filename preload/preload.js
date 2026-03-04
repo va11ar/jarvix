@@ -32,6 +32,8 @@ contextBridge.exposeInMainWorld('api', {
   skipAgent: (stepIndex, projectPath) => ipcRenderer.invoke('pipeline:skip-agent', { stepIndex, projectPath }),
   unskipAgent: (stepIndex, projectPath) => ipcRenderer.invoke('pipeline:unskip-agent', { stepIndex, projectPath }),
   killAgent: () => ipcRenderer.invoke('agent:kill'),
+  pipelineHasRunBefore: (projectPath) => ipcRenderer.invoke('pipeline:has-run-before', { projectPath }),
+  resetPipeline: (projectPath) => ipcRenderer.invoke('pipeline:reset', { projectPath }),
 
   // Editor
   openAgentEditor: (agentId) => ipcRenderer.invoke('editor:open', { agentId }),
@@ -61,6 +63,9 @@ contextBridge.exposeInMainWorld('api', {
   configureAuth: (config) => ipcRenderer.invoke('auth:configure', config),
   testAuth: (config) => ipcRenderer.invoke('auth:test', config),
   getAuthSettings: () => ipcRenderer.invoke('auth:get-settings'),
+  isOAuthEnabled: () => ipcRenderer.invoke('auth:oauth-enabled'),
+  setOAuthEnabled: (enabled) => ipcRenderer.invoke('auth:set-oauth-enabled', enabled),
+  restoreOAuthDefaults: () => ipcRenderer.invoke('auth:restore-oauth-defaults'),
 
   // Qwen Installation
   checkQwenInstalled: (customPath) => ipcRenderer.invoke('qwen:check-installed', customPath),

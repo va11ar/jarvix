@@ -7,7 +7,7 @@ const AgentLibrary = require('./project/AgentLibrary')
 const PipelineRunner = require('./pipeline/PipelineRunner')
 const AgentEditor = require('./editor/AgentEditor')
 const Settings = require('./settings')
-const { validateQwenAuth, configureQwenAuth, testQwenAuth } = require('./auth')
+const { validateQwenAuth, configureQwenAuth, testQwenAuth, isOAuthEnabled, setOAuthEnabled, restoreQwenSettingsToOAuthDefaults } = require('./auth')
 const CONSTANTS = require('./constants')
 
 // Every handler follows the same pattern: async, try/catch, return { error } on failure.
@@ -73,7 +73,7 @@ function registerIpcHandlers(win) {
   }))
 
   // ── Pipeline ─────────────────────────────────────────────────────────────
-  ipcMain.handle('pipeline:start',        h((args) => PipelineRunner.start(args.projectPath, args.resumeFrom, win)))
+  ipcMain.handle('pipeline:start', h((args) => PipelineRunner.start(args.projectPath, args.resumeFrom, win)))
   ipcMain.handle('pipeline:pause',        h(() => PipelineRunner.pause()))
   ipcMain.handle('pipeline:resume',       h(() => PipelineRunner.resume()))
   ipcMain.handle('pipeline:abort',        h(() => PipelineRunner.abort()))
@@ -81,6 +81,8 @@ function registerIpcHandlers(win) {
   ipcMain.handle('pipeline:skip-agent',   h(({ stepIndex, projectPath }) => PipelineRunner.skipAgent(stepIndex, projectPath)))
   ipcMain.handle('pipeline:unskip-agent', h(({ stepIndex, projectPath }) => PipelineRunner.unskipAgent(stepIndex, projectPath)))
   ipcMain.handle('agent:kill',            h(() => PipelineRunner.killCurrent()))
+  ipcMain.handle('pipeline:has-run-before', h(({ projectPath }) => PipelineRunner.hasRunBefore(projectPath)))
+  ipcMain.handle('pipeline:reset',        h(({ projectPath }) => PipelineRunner.reset(projectPath)))
 
   // ── Editor ───────────────────────────────────────────────────────────────
   ipcMain.handle('editor:open',           h(({ agentId }) => AgentEditor.open(agentId, win)))
@@ -142,6 +144,12 @@ function registerIpcHandlers(win) {
     const { getAuthSettings } = require('./auth')
     return await getAuthSettings()
   }))
+  ipcMain.handle('auth:oauth-enabled', h(async () => {
+    const enabled = await isOAuthEnabled()
+    return { enabled }
+  }))
+  ipcMain.handle('auth:set-oauth-enabled', h((enabled) => setOAuthEnabled(enabled)))
+  ipcMain.handle('auth:restore-oauth-defaults', h(async () => restoreQwenSettingsToOAuthDefaults()))
 
   // ── Qwen Installation ────────────────────────────────────────────────────
   ipcMain.handle('qwen:check-installed', h(async (customPath) => {

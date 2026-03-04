@@ -49,6 +49,8 @@ const IPC = {
   PIPELINE_SKIP_AGENT: 'pipeline:skip-agent',
   PIPELINE_UNSKIP_AGENT: 'pipeline:unskip-agent',
   AGENT_KILL: 'agent:kill',
+  PIPELINE_HAS_RUN_BEFORE: 'pipeline:has-run-before',
+  PIPELINE_RESET: 'pipeline:reset',
 
   // Editor
   EDITOR_OPEN: 'editor:open',
@@ -72,6 +74,7 @@ const IPC = {
   AUTH_CONFIGURE: 'auth:configure',
   AUTH_TEST: 'auth:test',
   AUTH_GET_SETTINGS: 'auth:get-settings',
+  AUTH_OAUTH_ENABLED: 'auth:oauth-enabled',
 
   // Qwen installation
   QWEN_CHECK_INSTALLED: 'qwen:check-installed',
