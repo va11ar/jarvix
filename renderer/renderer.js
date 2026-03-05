@@ -22,9 +22,6 @@ const state = {
   selectedNodeIndex: -1,
   selectedLibraryAgentId: null, // Track library agent selection separately
 
-  // Agent output
-  agentOutputs: new Map(), // agentId -> content
-
   // Activity log
   logEntries: [],
 
@@ -172,6 +169,7 @@ function wireEventListeners() {
   // Agent controls
   document.getElementById('btn-continue').addEventListener('click', handleContinue)
   document.getElementById('btn-kill-agent').addEventListener('click', handleKillAgent)
+  document.getElementById('btn-view-output').addEventListener('click', handleViewOutput)
   document.getElementById('btn-checkpoint-file').addEventListener('click', handleCheckpointFile)
 
   // Activity log
@@ -216,6 +214,19 @@ function wireEventListeners() {
       appendLogLine('Failed to refresh agents: ' + e.message, 'error')
     }
   })
+
+  // UUID hover reveal in detail panel
+  const detailHeader = document.getElementById('agent-detail-header')
+  if (detailHeader) {
+    detailHeader.addEventListener('mouseenter', () => {
+      document.getElementById('detail-uuid-label').style.display = ''
+      document.getElementById('detail-uuid').style.display = ''
+    })
+    detailHeader.addEventListener('mouseleave', () => {
+      document.getElementById('detail-uuid-label').style.display = 'none'
+      document.getElementById('detail-uuid').style.display = 'none'
+    })
+  }
 
   // Reviewer Status dropdown change handler
   document.getElementById('detail-reviewer-status').addEventListener('change', async (e) => {
@@ -389,6 +400,8 @@ function wireEventListeners() {
       cancelSelectionMode()
     }
   })
+
+  setupLogResize()
 }
 
 // ─── File Menu (JARVIX Logo) ────────────────────────────────────────────────
@@ -1106,6 +1119,7 @@ function handlePipelineStatus(data) {
   }
 
   updateTitlebarStatus()
+  updateStatusBar()
   renderPipelineAgents()
   renderPipelineCanvas()
   updateDetailPanel()
@@ -1578,9 +1592,9 @@ function updateTitlebarStatus() {
     startBtn.style.display = 'flex'
     pauseBtn.style.display = 'none'
   } else {
-    // idle
+    // idle — hide pause, nothing to pause
     startBtn.style.display = 'flex'
-    pauseBtn.style.display = 'flex'
+    pauseBtn.style.display = 'none'
     pauseIcon.textContent = '⏸'
     pauseBtn.classList.remove('paused')
     pauseBtn.setAttribute('data-tip', 'Pause')
@@ -1589,8 +1603,43 @@ function updateTitlebarStatus() {
 }
 
 function updateStatusBar() {
-  document.getElementById('sb-agents-count').textContent = state.agents.length
-  document.getElementById('sb-projects-count').textContent = state.projects.length
+  const dot = document.getElementById('sb-dot')
+  const stateEl = document.getElementById('sb-pipeline-state')
+  const stepEl = document.getElementById('sb-step')
+  const agentCountEl = document.getElementById('sb-agents-count')
+
+  if (dot && stateEl) {
+    const s = state.pipelineState
+    stateEl.textContent = s.charAt(0).toUpperCase() + s.slice(1)
+    stateEl.className = 'sb-val'
+    dot.style.animation = ''
+
+    if (s === 'running') {
+      dot.style.background = 'var(--amber)'
+      dot.style.animation = 'pulse 1.4s ease-in-out infinite'
+      stateEl.classList.add('running')
+    } else if (s === 'complete') {
+      dot.style.background = 'var(--green)'
+      stateEl.classList.add('ok')
+    } else if (s === 'error' || s === 'aborted') {
+      dot.style.background = 'var(--red)'
+    } else {
+      dot.style.background = 'var(--text-faint)'
+    }
+  }
+
+  if (stepEl) {
+    const total = state.pipelineSteps.length
+    if (total > 0 && state.currentStepIndex >= 0) {
+      stepEl.textContent = `${state.currentStepIndex + 1} / ${total}`
+    } else if (total > 0) {
+      stepEl.textContent = `0 / ${total}`
+    } else {
+      stepEl.textContent = '—'
+    }
+  }
+
+  if (agentCountEl) agentCountEl.textContent = state.agents.length
 }
 
 // ─── Pipeline Rendering ─────────────────────────────────────────────────────
@@ -1644,23 +1693,20 @@ function renderPipelineAgents() {
     // State tag: all done when complete, otherwise based on currentStepIndex
     const stateTag = isSkipped ? 'skip' :
                      (state.pipelineState === 'complete' || index < state.currentStepIndex) ? 'done' :
-                     index === state.currentStepIndex ? 'run' : 'idle'
+                     index === state.currentStepIndex ? 'running' : 'idle'
 
-    // Selection indicator: triangle for selected, nothing for others
-    const selectionIndicator = item.dataset.agentId === state.selectedAgentId
+    // Running indicator: triangle for currently running agent, or next agent to run if idle/paused
+    const isRunning = index === state.currentStepIndex && state.pipelineState === 'running'
+    const isPaused = state.pipelineState === 'paused' && index === state.currentStepIndex
+    const isNextToRun = state.pipelineState === 'idle' && index === 0
+    const runningIndicator = (isRunning || isPaused || isNextToRun)
       ? '<div class="agent-triangle">▶</div>'
       : '<div class="agent-triangle-placeholder"></div>'
 
-    // Running indicator: bold "Running" text for currently running agent
-    const runningIndicator = (index === state.currentStepIndex && state.pipelineState === 'running')
-      ? '<span class="agent-running-label">Running</span>'
-      : ''
-
     item.innerHTML = `
-      ${selectionIndicator}
+      ${runningIndicator}
       <div class="agent-name-wrapper">
         <div class="agent-name">${agentName}</div>
-        ${runningIndicator}
       </div>
       <div class="agent-state-tag">${stateTag}</div>
     `
@@ -1676,8 +1722,8 @@ function renderPipelineAgents() {
 }
 
 function setPipelineControlsDisabled(disabled) {
-  // Add Agent and Create Agent are always enabled
-  const alwaysEnabled = ['btn-add-agent', 'btn-create-agent']
+  // No buttons are always enabled
+  const alwaysEnabled = []
   // These are disabled when pipeline is empty
   const disableWhenEmpty = ['btn-remove-agent']
   // These require pipeline to be paused AND have a selected agent
@@ -1687,6 +1733,29 @@ function setPipelineControlsDisabled(disabled) {
   alwaysEnabled.forEach(id => {
     const btn = document.getElementById(id)
     if (btn) btn.disabled = false
+  })
+
+  // Disable structural buttons when pipeline is running
+  const disableWhenRunning = ['btn-add-agent', 'btn-create-agent', 'btn-remove-agent']
+  disableWhenRunning.forEach(id => {
+    const btn = document.getElementById(id)
+    if (!btn) return
+    const wrapper = btn.parentElement
+    if (state.pipelineState === 'running') {
+      btn.disabled = true
+      if (wrapper && !wrapper.getAttribute('data-tip')) {
+        wrapper.setAttribute('data-tip', 'Pause or stop the pipeline first')
+      }
+    } else {
+      if (id === 'btn-remove-agent') {
+        btn.disabled = disabled // disabled = pipeline is empty
+      } else {
+        btn.disabled = false
+      }
+      if (wrapper && wrapper.getAttribute('data-tip') === 'Pause or stop the pipeline first') {
+        wrapper.removeAttribute('data-tip')
+      }
+    }
   })
 
   // Disable/enable based on whether pipeline has agents
@@ -1760,15 +1829,21 @@ function renderPipelineCanvas() {
   const canvasInner = document.getElementById('canvas-inner')
   canvas.innerHTML = ''
 
+  // Show/hide progress section based on whether there are agents
+  const progressSection = document.getElementById('pipeline-progress-section')
+  if (progressSection) {
+    progressSection.style.display = state.pipelineSteps.length === 0 ? 'none' : 'block'
+  }
+
   // Show empty state if no agents in pipeline
   if (state.pipelineSteps.length === 0) {
     canvas.innerHTML = `
       <div class="pipeline-empty-state">
         <div class="pipeline-empty-icon">⊘</div>
-        <div class="pipeline-empty-title">No agents in pipeline</div>
+        <div class="pipeline-empty-title">Pipeline is empty</div>
         <div class="pipeline-empty-text">
-          This project has no agents configured.<br>
-          Edit the pipeline to add agents and start the workflow.
+          Use <strong style="color:var(--text)">Create Agent</strong> to define a new agent,
+          then <strong style="color:var(--text)">Add Agent</strong> to add it here.
         </div>
       </div>
     `
@@ -1851,12 +1926,23 @@ function renderPipelineCanvas() {
         connector.appendChild(line)
         connector.appendChild(arrow)
 
-        // Only show loop count for revision loops (bounded), not iteration (unbounded)
+        // Add pips container for revision loops (bounded), not iteration (unbounded)
         if (loopType === 'revision') {
-          const loopLabel = document.createElement('span')
-          loopLabel.className = 'connector-loop-count'
-          loopLabel.textContent = `${currentLoop}/${maxLoops}`
-          connector.appendChild(loopLabel)
+          const pipsContainer = document.createElement('div')
+          pipsContainer.className = 'connector-pips-container'
+          pipsContainer.dataset.agentId = nextStep.agent_id
+          pipsContainer.dataset.maxLoops = maxLoops
+          
+          // Render pips
+          for (let i = 1; i <= maxLoops; i++) {
+            const pip = document.createElement('div')
+            pip.className = 'connector-pip'
+            if (i < currentLoop) pip.classList.add('done')
+            else if (i === currentLoop) pip.classList.add('active')
+            pipsContainer.appendChild(pip)
+          }
+          
+          connector.appendChild(pipsContainer)
         }
       } else {
         connector.className = 'connector'
@@ -1895,7 +1981,16 @@ function renderPipelineCanvas() {
 
 // ─── Agent Selection ────────────────────────────────────────────────────────
 
+function openDetailPanel() {
+  document.getElementById('col-detail').classList.remove('collapsed')
+}
+
+function closeDetailPanel() {
+  document.getElementById('col-detail').classList.add('collapsed')
+}
+
 function selectAgent(index) {
+  openDetailPanel()
   state.selectedNodeIndex = index
   state.selectedAgentId = state.pipelineSteps[index]?.agent_id
 
@@ -1917,6 +2012,7 @@ function selectAgent(index) {
 }
 
 function deselectAgent() {
+  closeDetailPanel()
   state.selectedNodeIndex = -1
   state.selectedAgentId = null
   state.selectedLibraryAgentId = null
@@ -2009,6 +2105,7 @@ function updateRoleUI(agent) {
 }
 
 function selectLibraryAgent(agent) {
+  openDetailPanel()
   // Clear pipeline selection
   state.selectedNodeIndex = -1
   state.selectedAgentId = null
@@ -2039,31 +2136,21 @@ async function updateDetailPanel(libraryAgent = null) {
       document.getElementById('detail-agent-name').textContent = agent.name
       document.getElementById('detail-status').textContent = 'Not in pipeline'
       document.getElementById('detail-uuid').textContent = agent.id || '—'
-      document.getElementById('detail-elapsed').textContent = '—'
+      document.getElementById('detail-uuid-label').style.display = 'none'
+      document.getElementById('detail-uuid').style.display = 'none'
       document.getElementById('detail-timeout').textContent = agent ? `${agent.timeout_seconds}s` : '—'
-      document.getElementById('detail-reads').textContent = agent?.reads?.length ? `${agent.reads.length} files` : 'None'
+      if (agent?.reads?.length) {
+        const names = agent.reads.map(r => String(r).split('/').pop().replace(/\.md$/, ''))
+        document.getElementById('detail-reads').textContent = names.join(', ')
+      } else {
+        document.getElementById('detail-reads').textContent = 'None'
+      }
 
       // Update Reviewer Status dropdown and related fields
       updateLoopConfigUI(agent)
       // Update Role dropdown
       updateRoleUI(agent)
 
-      // Hide progress bar for library agents
-      document.getElementById('progress-fill').style.width = '0%'
-      document.getElementById('progress-text').textContent = 'Step 0 of 0'
-
-      // Review section - show if agent is a reviewer (has loop.type)
-      const reviewSection = document.getElementById('review-section')
-      const isReviewer = agent.loop && agent.loop.type
-      if (isReviewer) {
-        reviewSection.classList.remove('hidden')
-        // Update pips with current loop count (0 for library agents not in pipeline)
-        const loopCount = 0
-        const maxLoops = agent.loop?.max_revision_loops || 5
-        updateReviewPips(agent.id, loopCount, maxLoops, agent.loop.type)
-      } else {
-        reviewSection.classList.add('hidden')
-      }
       return
     }
   }
@@ -2073,7 +2160,8 @@ async function updateDetailPanel(libraryAgent = null) {
     document.getElementById('detail-agent-name').textContent = 'No agent selected'
     document.getElementById('detail-status').textContent = '—'
     document.getElementById('detail-uuid').textContent = '—'
-    document.getElementById('detail-elapsed').textContent = '—'
+    document.getElementById('detail-uuid-label').style.display = 'none'
+    document.getElementById('detail-uuid').style.display = 'none'
     document.getElementById('detail-timeout').textContent = '—'
     document.getElementById('detail-reads').textContent = '—'
 
@@ -2092,7 +2180,6 @@ async function updateDetailPanel(libraryAgent = null) {
     // Reset Role dropdown to Regular
     document.getElementById('detail-agent-role').value = ''
 
-    document.getElementById('agent-output').innerHTML = '<div class="output-placeholder">Select an agent to view output</div>'
     return
   }
 
@@ -2109,6 +2196,8 @@ async function updateDetailPanel(libraryAgent = null) {
 
   // UUID
   document.getElementById('detail-uuid').textContent = agent?.id || '—'
+  document.getElementById('detail-uuid-label').style.display = 'none'
+  document.getElementById('detail-uuid').style.display = 'none'
 
   // Update Reviewer Status dropdown and related fields
   updateLoopConfigUI(agent)
@@ -2116,26 +2205,11 @@ async function updateDetailPanel(libraryAgent = null) {
   updateRoleUI(agent)
 
   document.getElementById('detail-timeout').textContent = agent ? `${agent.timeout_seconds}s` : '—'
-  document.getElementById('detail-reads').textContent = agent?.reads?.length ? `${agent.reads.length} files` : 'None'
-
-  // Update progress bar
-  const total = state.pipelineSteps.length
-  const completed = state.currentStepIndex >= 0 ? state.currentStepIndex : 0
-  const pct = total > 0 ? (completed / total) * 100 : 0
-  document.getElementById('progress-fill').style.width = `${pct}%`
-  document.getElementById('progress-text').textContent = `Step ${Math.min(completed + 1, total)} of ${total}`
-
-  // Review section - show if agent is a reviewer (has loop.type)
-  const reviewSection = document.getElementById('review-section')
-  const isReviewer = agent?.loop && agent.loop.type
-  if (isReviewer) {
-    reviewSection.classList.remove('hidden')
-    // Update pips with current loop count
-    const loopCount = state.revisionLoopCounts?.[agent.id] ?? 0
-    const maxLoops = agent.loop?.max_revision_loops || 5
-    updateReviewPips(agent.id, loopCount, maxLoops, agent.loop.type)
+  if (agent?.reads?.length) {
+    const names = agent.reads.map(r => String(r).split('/').pop().replace(/\.md$/, ''))
+    document.getElementById('detail-reads').textContent = names.join(', ')
   } else {
-    reviewSection.classList.add('hidden')
+    document.getElementById('detail-reads').textContent = 'None'
   }
 
   // Update Skip Agent button text based on selected agent status
@@ -2164,36 +2238,33 @@ function updateSkipAgentButtonText() {
  * @param {string} loopType - 'revision' or 'iteration'
  */
 function updateReviewPips(agentId, loopCount, maxLoops, loopType) {
-  const section = document.getElementById('review-section')
-  const label = section.querySelector('.progress-label')
-  const pipsContainer = document.getElementById('review-pips')
-  const textEl = document.getElementById('review-text')
+  // Find the pips container for this agent on the connector
+  const pipsContainer = document.querySelector(`.connector-pips-container[data-agent-id="${agentId}"]`)
+  if (!pipsContainer) return
 
-  section.classList.remove('hidden')
-  label.textContent = 'REVIEW LOOP'
+  // Update the max loops dataset
+  pipsContainer.dataset.maxLoops = maxLoops
 
   if (loopType === 'iteration') {
     // Indeterminate mode: show spinner, no pips
     pipsContainer.innerHTML = '<div class="pip-spinner"></div>'
-    textEl.textContent = ''
   } else {
     // Revision mode: show pips
     pipsContainer.innerHTML = ''
     for (let i = 1; i <= maxLoops; i++) {
       const pip = document.createElement('div')
-      pip.className = 'pip'
+      pip.className = 'connector-pip'
       if (i < loopCount) pip.classList.add('done')
       else if (i === loopCount) pip.classList.add('active')
       pipsContainer.appendChild(pip)
     }
-    textEl.textContent = `${loopCount} / ${maxLoops}`
   }
 }
 
 function updateAgentControls() {
   const continueBtn = document.getElementById('btn-continue')
   const killBtn = document.getElementById('btn-kill-agent')
-  const editOutputBtn = document.getElementById('btn-edit-output')
+  const viewOutputBtn = document.getElementById('btn-view-output')
   const roleSelect = document.getElementById('detail-agent-role')
 
   // Continue only when paused at transition
@@ -2208,25 +2279,11 @@ function updateAgentControls() {
     killBtn.classList.toggle('hidden', !isRunning || !hasSelection)
   }
 
-  // Edit output: hidden when no agent selected, disabled when pipeline running
-  if (editOutputBtn) {
-    const selectedAgentId = state.pipelineSteps[state.selectedNodeIndex]?.agent_id
-    const hasOutput = state.agentOutputs.get(selectedAgentId)
+  // View Output: show when a pipeline agent is selected and pipeline is not running
+  if (viewOutputBtn) {
     const hasSelection = state.selectedNodeIndex !== -1
     const isRunning = state.pipelineState === 'running'
-
-    if (!hasSelection) {
-      // No agent selected: hide the button
-      editOutputBtn.classList.add('hidden')
-    } else if (isRunning) {
-      // Agent selected but pipeline running: show but disable
-      editOutputBtn.classList.remove('hidden')
-      editOutputBtn.disabled = true
-    } else {
-      // Agent selected and pipeline not running: show and enable if there's output
-      editOutputBtn.classList.remove('hidden')
-      editOutputBtn.disabled = !hasOutput
-    }
+    viewOutputBtn.classList.toggle('hidden', !hasSelection || isRunning)
   }
 
   // Role dropdown: disabled when pipeline is running or in error state
@@ -2318,15 +2375,44 @@ async function handleStart() {
   // Note: btnStart will be re-enabled by handlePipelineStatus() when state updates
 }
 
+let _abortConfirmTimer = null
+
 async function handleAbort() {
-  if (!confirm('Are you sure you want to abort the pipeline?')) return
-  try {
-    await window.api.abortPipeline()
-    state.pipelineState = 'idle'
-    updateTitlebarStatus()
-  } catch (e) {
-    appendLogLine('Failed to abort: ' + e.message, 'error')
+  const btn = document.getElementById('btn-abort')
+  if (!btn) return
+
+  if (btn.dataset.confirming === 'true') {
+    clearTimeout(_abortConfirmTimer)
+    btn.dataset.confirming = 'false'
+    btn.textContent = '■'
+    btn.setAttribute('data-tip', 'Abort')
+    btn.style.borderColor = ''
+    btn.style.color = ''
+    try {
+      await window.api.abortPipeline()
+      state.pipelineState = 'idle'
+      updateTitlebarStatus()
+    } catch (e) {
+      appendLogLine('Failed to abort: ' + e.message, 'error')
+    }
+    return
   }
+
+  btn.dataset.confirming = 'true'
+  btn.textContent = '■?'
+  btn.setAttribute('data-tip', 'Click again to confirm abort')
+  btn.style.borderColor = 'var(--red)'
+  btn.style.color = 'var(--red)'
+
+  _abortConfirmTimer = setTimeout(() => {
+    if (btn.dataset.confirming === 'true') {
+      btn.dataset.confirming = 'false'
+      btn.textContent = '■'
+      btn.setAttribute('data-tip', 'Abort')
+      btn.style.borderColor = ''
+      btn.style.color = ''
+    }
+  }, 3000)
 }
 
 async function handleContinue() {
@@ -2337,12 +2423,39 @@ async function handleContinue() {
   }
 }
 
+let _killConfirmTimer = null
+
 async function handleKillAgent() {
-  try {
-    await window.api.killAgent()
-  } catch (e) {
-    appendLogLine('Failed to kill agent: ' + e.message, 'error')
+  const btn = document.getElementById('btn-kill-agent')
+  if (!btn) return
+
+  if (btn.dataset.confirming === 'true') {
+    clearTimeout(_killConfirmTimer)
+    btn.dataset.confirming = 'false'
+    btn.textContent = 'Kill Agent'
+    btn.style.borderColor = ''
+    btn.style.color = ''
+    try {
+      await window.api.killAgent()
+    } catch (e) {
+      appendLogLine('Failed to kill agent: ' + e.message, 'error')
+    }
+    return
   }
+
+  btn.dataset.confirming = 'true'
+  btn.textContent = 'Confirm?'
+  btn.style.borderColor = 'var(--red)'
+  btn.style.color = 'var(--red)'
+
+  _killConfirmTimer = setTimeout(() => {
+    if (btn.dataset.confirming === 'true') {
+      btn.dataset.confirming = 'false'
+      btn.textContent = 'Kill Agent'
+      btn.style.borderColor = ''
+      btn.style.color = ''
+    }
+  }, 2000)
 }
 
 async function handleKillAgentFromContextMenu(agentId, agentName) {
@@ -2368,24 +2481,24 @@ async function handleKillAgentFromContextMenu(agentId, agentName) {
   }
 }
 
-async function handleEditOutput() {
+async function handleViewOutput() {
   try {
     if (!state.currentProject || state.selectedNodeIndex === -1) {
       appendLogLine('No agent selected', 'warn')
       return
     }
-
     const step = state.pipelineSteps[state.selectedNodeIndex]
-    const agent = state.agents.find(a => a.id === step.agent_id)
-
-    if (!agent || !agent.filePath) {
-      appendLogLine('Selected agent does not have an output file. This is likely because the agent did not output anything or did not complete a run yet.', 'warn')
+    const agent = state.agents.find(a => a.id === step?.agent_id)
+    if (!agent?.filePath) {
+      appendLogLine('No agent selected', 'warn')
       return
     }
-
-    const result = await window.api.openAgentOutput(state.currentProject.projectPath, agent.filePath)
+    const result = await window.api.openAgentOutput(
+      state.currentProject.projectPath,
+      agent.filePath
+    )
     if (result.exists === false) {
-      appendLogLine('Selected agent does not have an output file. This is likely because the agent did not output anything or did not complete a run yet.', 'warn')
+      appendLogLine('No output file found for this agent yet', 'warn')
     }
   } catch (e) {
     appendLogLine('Failed to open output file: ' + e.message, 'error')
@@ -2453,6 +2566,44 @@ function appendLogLine(message, type = 'info', time = null) {
 function clearLog() {
   document.getElementById('log-lines').innerHTML = ''
   state.logEntries = []
+}
+
+function setupLogResize() {
+  const handle = document.getElementById('log-resize-handle')
+  const log = document.getElementById('activity-log')
+  if (!handle || !log) return
+
+  // Restore saved height
+  const saved = localStorage.getItem('jarvix:logHeight')
+  if (saved) {
+    const h = parseInt(saved, 10)
+    if (h >= 72 && h <= window.innerHeight * 0.4) {
+      log.style.height = h + 'px'
+    }
+  }
+
+  handle.addEventListener('mousedown', (startEvent) => {
+    startEvent.preventDefault()
+    const startY = startEvent.clientY
+    const startH = log.offsetHeight
+    handle.classList.add('dragging')
+
+    function onMove(e) {
+      const delta = startY - e.clientY // drag up = larger
+      const newH = Math.max(72, Math.min(startH + delta, window.innerHeight * 0.4))
+      log.style.height = newH + 'px'
+    }
+
+    function onUp() {
+      handle.classList.remove('dragging')
+      localStorage.setItem('jarvix:logHeight', log.offsetHeight)
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', onUp)
+    }
+
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
+  })
 }
 
 function escapeHtml(text) {

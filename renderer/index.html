@@ -52,12 +52,10 @@
         <span class="tb-project-tooltip" id="tb-project-tooltip">&lt; Click here to edit the project's brief</span>
       </div>
 
-      <div style="flex:1;-webkit-app-region:drag;"></div>
-
       <div class="tb-controls">
         <div class="tb-pill idle" id="status-pill">Idle</div>
         <button class="tb-btn start" id="btn-start" data-tip="Start Pipeline" title="" aria-label="Start Pipeline">
-          ▶
+          ▶ Start
         </button>
         <button class="tb-btn pause" id="btn-pause" data-tip="Pause" title="" aria-label="Pause">
           <span id="pause-icon">⏸</span>
@@ -114,19 +112,26 @@
           </span>
           <button class="review-banner-cancel" id="btn-review-banner-cancel">Cancel  ✕</button>
         </div>
+        <div class="pipeline-progress-section" id="pipeline-progress-section">
+          <div class="progress-label">PIPELINE PROGRESS</div>
+          <div class="progress-track">
+            <div class="progress-fill" id="progress-fill" style="width: 0%"></div>
+          </div>
+          <div class="progress-text" id="progress-text">Step 0 of 0</div>
+        </div>
         <div id="canvas-inner">
           <div id="pipeline-canvas"></div>
         </div>
       </div>
 
       <!-- ── COL 3: DETAIL ── -->
-      <div id="col-detail">
+      <div id="col-detail" class="collapsed">
         <div id="agent-detail-header">
           <div class="detail-agent-name" id="detail-agent-name">No agent selected</div>
           <div class="meta-grid">
             <div class="meta-key">Status</div>
             <div class="meta-val" id="detail-status">—</div>
-            <div class="meta-key">UUID</div>
+            <div class="meta-key" id="detail-uuid-label">UUID</div>
             <div class="meta-val" id="detail-uuid">—</div>
           </div>
           <div class="agent-role-section">
@@ -152,8 +157,6 @@
             </div>
             <div class="meta-key hidden" id="detail-target-label">Target</div>
             <div class="meta-val hidden" id="detail-target">—</div>
-            <div class="meta-key">Elapsed</div>
-            <div class="meta-val" id="detail-elapsed">—</div>
             <div class="meta-key">Timeout</div>
             <div class="meta-val" id="detail-timeout">—</div>
             <div class="meta-key">Reads</div>
@@ -161,26 +164,11 @@
           </div>
         </div>
 
-        <div class="progress-section">
-          <div class="progress-label">PIPELINE PROGRESS</div>
-          <div class="progress-track">
-            <div class="progress-fill" id="progress-fill" style="width: 0%"></div>
-          </div>
-          <div class="progress-text" id="progress-text">Step 0 of 0</div>
-        </div>
-
-        <div class="review-section hidden" id="review-section">
-          <div class="progress-label">REVIEW LOOP</div>
-          <div class="pips" id="review-pips"></div>
-          <div class="progress-text" id="review-text"></div>
-        </div>
-
-        <div id="agent-output">
-          <div class="output-placeholder">Select an agent to view output</div>
-        </div>
+        <div style="flex: 1;"></div>
 
         <div id="agent-controls">
           <button class="agent-btn primary hidden" id="btn-continue">Continue</button>
+          <button class="agent-btn hidden" id="btn-view-output">View Output</button>
           <button class="agent-btn" id="btn-checkpoint-file">Edit Context</button>
           <button class="pipe-btn danger" id="btn-kill-agent">Kill Agent</button>
         </div>
@@ -191,6 +179,7 @@
     <!-- ══════════════════════════════════════════════
          ACTIVITY LOG
     ══════════════════════════════════════════════════ -->
+    <div id="log-resize-handle"></div>
     <div id="activity-log">
       <div id="log-header">
         <span class="log-title">ACTIVITY LOG</span>
@@ -204,16 +193,20 @@
     ══════════════════════════════════════════════════ -->
     <div id="statusbar">
       <div class="sb-seg">
-        <span class="sb-label">Qwen CLI:</span>
-        <span class="sb-val" id="sb-qwen-status">Not connected</span>
+        <div class="sb-dot" id="sb-dot"></div>
+        <span class="sb-val" id="sb-pipeline-state">Idle</span>
       </div>
       <div class="sb-seg">
-        <span class="sb-label">Agents:</span>
+        <span class="sb-label">Step</span>
+        <span class="sb-val" id="sb-step">—</span>
+      </div>
+      <div class="sb-seg">
+        <span class="sb-label">CLI</span>
+        <span class="sb-val" id="sb-cli-status">Qwen Code</span>
+      </div>
+      <div class="sb-seg">
+        <span class="sb-label">Agents</span>
         <span class="sb-val" id="sb-agents-count">0</span>
-      </div>
-      <div class="sb-seg">
-        <span class="sb-label">Projects:</span>
-        <span class="sb-val" id="sb-projects-count">0</span>
       </div>
     </div>
 
