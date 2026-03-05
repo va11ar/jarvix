@@ -1,5 +1,6 @@
 const path = require('path')
 const crypto = require('crypto')
+const { ipcMain } = require('electron')
 const { PIPELINE_STATES, STEP_STATUSES, IPC, AGENT_ROLES } = require('../constants')
 const Checkpoint = require('../checkpoint/Checkpoint')
 const ActivityLog = require('./ActivityLog')
@@ -149,8 +150,12 @@ class PipelineRunner {
         const agent = this.agentSnapshots.get(this.steps[i].agent_id)
         if (agent && agent.role === AGENT_ROLES.PROGRAMMER) {
           this.programmerStepIndex = i
+          await ActivityLog.append(this.currentProjectPath, `DEBUG: Found programmer agent at step index ${i} (${agent.name})`, 'warn')
           break
         }
+      }
+      if (this.programmerStepIndex === null) {
+        await ActivityLog.append(this.currentProjectPath, 'DEBUG: No programmer agent found in pipeline', 'warn')
       }
 
       // Reset discovery state for this run
@@ -166,8 +171,10 @@ class PipelineRunner {
 
       // Load existing checkpoint if it exists (to preserve skipped status)
       const existingCheckpoint = await Checkpoint.load(projectPath)
-      const initialLoopCount = existingCheckpoint?.loop_count || 0
-      await ActivityLog.append(this.currentProjectPath, `Pipeline starting — existing loop_count=${initialLoopCount}`, 'info')
+      // Support both old loop_count and new loop_counts structure
+      const legacyLoopCount = existingCheckpoint?.loop_count || 0
+      const loopCounts = existingCheckpoint?.loop_counts || {}
+      await ActivityLog.append(this.currentProjectPath, `Pipeline starting — legacy loop_count=${legacyLoopCount}, loop_counts=${JSON.stringify(loopCounts)}`, 'info')
       if (existingCheckpoint) {
         await ActivityLog.append(this.currentProjectPath, `Checkpoint loaded — ${existingCheckpoint.steps?.length || 0} steps`, 'info')
         // Log first few step statuses for debugging
@@ -214,8 +221,7 @@ class PipelineRunner {
         run_id: runId,
         pipeline: projectJson.name,
         steps: checkpointSteps,
-        // Reset loop_count for fresh starts, preserve for resumes
-        loop_count: startIndex === 0 ? 0 : initialLoopCount,
+        loop_counts: {}, // Fresh per-agent loop counts
       })
 
       // Log pipeline start
@@ -261,6 +267,8 @@ class PipelineRunner {
       const step = this.steps[i]
       const agent = this.agentSnapshots.get(step.agent_id)
 
+      await ActivityLog.append(this.currentProjectPath, `DEBUG: Processing step ${i}, agent=${agent?.name}, role=${agent?.role}, programmerStepIndex=${this.programmerStepIndex}, commandDiscoveryDone=${this.commandDiscoveryDone}`, 'warn')
+
       if (!agent) {
         await ActivityLog.append(this.currentProjectPath, `Agent not found: ${step.agent_id}`, 'error')
         this.state = PIPELINE_STATES.ERROR
@@ -282,6 +290,7 @@ class PipelineRunner {
       if (i === this.programmerStepIndex && !this.commandDiscoveryDone) {
         const preflightResult = await this._runPreflight(agent)
         this.commandDiscoveryDone = true
+        await ActivityLog.append(this.currentProjectPath, `Pre-flight completed`, 'info')
 
         if (preflightResult.aborted) {
           // User declined and aborted in State E
@@ -395,10 +404,9 @@ class PipelineRunner {
         if (agent.review_target && agent.loop && agent.loop.type) {
           // Find the review target step
           const targetIndex = this.steps.findIndex(s => s.agent_id === agent.review_target)
-          await ActivityLog.append(this.currentProjectPath, `LOOP DEBUG: reviewer=${agent.name}, targetIndex=${targetIndex}, currentStepIndex=${i}`, 'warn')
+          const loopCount = await Checkpoint.incrementLoopCount(this.currentProjectPath, agent.id)
+          await ActivityLog.append(this.currentProjectPath, `LOOP DEBUG: reviewer=${agent.name}, targetIndex=${targetIndex}, currentStepIndex=${i}, loopCount=${loopCount}`, 'warn')
           if (targetIndex !== -1 && targetIndex < i) {
-            const loopCount = await Checkpoint.incrementLoopCount(this.currentProjectPath)
-            await ActivityLog.append(this.currentProjectPath, `LOOP DEBUG: loopCount incremented to ${loopCount}`, 'warn')
             const isRevision = agent.loop.type === 'revision'
             const maxLoops = isRevision ? (agent.loop.max_revision_loops || 5) : Infinity
 
@@ -597,7 +605,7 @@ class PipelineRunner {
           completed_at: null,
           status: s.status || STEP_STATUSES.IDLE,
         })),
-        loop_count: 0,
+        loop_counts: {},
       })
     } else {
       await Checkpoint.updateStep(targetPath, stepIndex, {
@@ -689,7 +697,7 @@ class PipelineRunner {
           completed_at: null,
           status: s.status || STEP_STATUSES.IDLE,
         })),
-        loop_count: 0,
+        loop_counts: {},
       })
     } else {
       await Checkpoint.updateStep(targetPath, stepIndex, {
@@ -735,47 +743,114 @@ class PipelineRunner {
     const projectPath = this.currentProjectPath
     const win = this.currentWin
 
+    await ActivityLog.append(projectPath, `_runPreflight started for agent ${programmerAgent.name}`, 'warn')
+
     try {
-      // Check if discovery output exists from a prior run (State F)
-      const discoveryOutputPath = path.join(projectPath, '.jarvix', 'discovery-output.json')
-      let commands = null
+      // State B — Show choice modal FIRST (before discovery runs)
+      win.webContents.send(IPC.DISCOVERY_COMPLETE, { delta: [] })
 
-      // State A — Loading screen
-      win.webContents.send(IPC.DISCOVERY_STARTED)
-
-      try {
-        // Try to read existing discovery output
-        const existingOutput = await fs.readFile(discoveryOutputPath, 'utf8')
-        commands = JSON.parse(existingOutput)
-        if (!Array.isArray(commands)) {
-          commands = null
+      // Wait for user choice
+      const choice = await new Promise((resolve) => {
+        const cleanup = () => {
+          ipcMain.removeListener('discovery:user-approve', onInfer)
+          ipcMain.removeListener('discovery:user-sandbox', onSandbox)
+          ipcMain.removeListener('discovery:user-abort', onAbort)
         }
-      } catch {
-        // No existing output — run discovery
+
+        const onInfer = (event) => {
+          cleanup()
+          resolve({ action: 'infer' })
+        }
+
+        const onSandbox = (event) => {
+          cleanup()
+          resolve({ action: 'sandbox' })
+        }
+
+        const onAbort = (event) => {
+          cleanup()
+          resolve({ action: 'abort' })
+        }
+
+        ipcMain.once('discovery:user-approve', onInfer)
+        ipcMain.once('discovery:user-sandbox', onSandbox)
+        ipcMain.once('discovery:user-abort', onAbort)
+      })
+
+      await ActivityLog.append(projectPath, `DEBUG: User chose: ${choice.action}`, 'warn')
+
+      // Handle user choice
+      if (choice.action === 'abort') {
+        return { aborted: true }
       }
 
-      if (!commands) {
-        // Run discovery agent
-        const settings = await Settings.load()
-        const qwenPath = settings.qwenPath || 'qwen'
-
-        try {
-          const result = await runDiscovery(projectPath, programmerAgent, qwenPath)
-          commands = result.commands
-        } catch (e) {
-          // Discovery failed — surface error to UI
-          win.webContents.send(IPC.DISCOVERY_ERROR, { message: e.message })
-          // Wait for user to acknowledge (they'll abort or retry via UI)
+      if (choice.action === 'sandbox') {
+        // Check Docker availability
+        const dockerAvailable = await this._checkDocker()
+        if (!dockerAvailable) {
+          // Send Docker error
+          win.webContents.send(IPC.DISCOVERY_ERROR, {
+            message: 'Sandbox mode requires Docker. Docker was not detected on this system.',
+            dockerRequired: true,
+          })
+          // Wait for retry or choose differently
           return await new Promise((resolve) => {
-            const handler = (_, data) => {
-              if (data.action === 'abort') {
-                win.webContents.removeListener('discovery:user-abort', handler)
-                resolve({ aborted: true })
+            const onRetry = async () => {
+              ipcMain.removeListener('discovery:user-sandbox', onRetry)
+              ipcMain.removeListener('discovery:user-abort', onChooseDifferently)
+              const retryDocker = await this._checkDocker()
+              if (retryDocker) {
+                this.useSandboxMode = true
+                resolve({ sandbox: true })
+              } else {
+                win.webContents.send(IPC.DISCOVERY_ERROR, {
+                  message: 'Sandbox mode requires Docker. Docker was not detected on this system.',
+                  dockerRequired: true,
+                })
+                ipcMain.once('discovery:user-sandbox', onRetry)
+                ipcMain.once('discovery:user-abort', onChooseDifferently)
               }
             }
-            win.webContents.on('discovery:user-abort', handler)
+            const onChooseDifferently = () => {
+              ipcMain.removeListener('discovery:user-sandbox', onRetry)
+              ipcMain.removeListener('discovery:user-abort', onChooseDifferently)
+              // Go back to choice
+              win.webContents.send(IPC.DISCOVERY_COMPLETE, { delta: [] })
+              ipcMain.once('discovery:user-approve', onInfer)
+              ipcMain.once('discovery:user-sandbox', onSandbox)
+              ipcMain.once('discovery:user-abort', onAbort)
+            }
+            ipcMain.once('discovery:user-sandbox', onRetry)
+            ipcMain.once('discovery:user-abort', onChooseDifferently)
           })
         }
+        this.useSandboxMode = true
+        return { sandbox: true }
+      }
+
+      // User chose 'infer' — State A: Loading screen
+      win.webContents.send(IPC.DISCOVERY_STARTED)
+
+      // Run discovery agent
+      const settings = await Settings.load()
+      const qwenPath = settings.qwenPath || 'qwen'
+
+      let commands
+      try {
+        const result = await runDiscovery(projectPath, programmerAgent, qwenPath)
+        commands = result.commands
+      } catch (e) {
+        // Discovery failed
+        win.webContents.send(IPC.DISCOVERY_ERROR, { message: e.message })
+        return await new Promise((resolve) => {
+          const handler = (_, data) => {
+            if (data.action === 'abort') {
+              win.webContents.removeListener('discovery:user-abort', handler)
+              resolve({ aborted: true })
+            }
+          }
+          win.webContents.on('discovery:user-abort', handler)
+        })
       }
 
       // Load baseline to compute delta
@@ -786,90 +861,37 @@ class PipelineRunner {
       // Compute delta: commands not already in baseline
       const delta = commands.filter(cmd => !existingAllowed.has(`run_shell_command(${cmd})`))
 
-      // State B — Pre-flight modal
-      // Send delta to renderer and wait for user choice
+      await ActivityLog.append(projectPath, `Discovery found ${commands.length} commands, ${delta.length} need approval`, 'info')
+
+      // If delta is empty, auto-approve and continue
+      if (delta.length === 0) {
+        // Tell renderer to close overlay and continue
+        win.webContents.send(IPC.DISCOVERY_COMPLETE, { delta })
+        return {}
+      }
+
+      // State D — Show approval list
       win.webContents.send(IPC.DISCOVERY_COMPLETE, { delta })
 
-      // Wait for user response via IPC
+      // Wait for approve or decline
       return await new Promise((resolve) => {
         const cleanup = () => {
-          win.webContents.removeListener('discovery:user-approve', onApprove)
-          win.webContents.removeListener('discovery:user-sandbox', onSandbox)
-          win.webContents.removeListener('discovery:user-abort', onAbort)
+          ipcMain.removeListener('discovery:user-approve', onApprove)
+          ipcMain.removeListener('discovery:user-abort', onAbort)
         }
 
         const onApprove = async () => {
           cleanup()
           try {
-            // Write approved commands to baseline.json
             const result = await ProjectManager.addApprovedCommands(projectPath, delta)
             if (result.error) {
               resolve({ error: result.error })
               return
             }
-
-            // Delete discovery output on successful approval
-            try {
-              await fs.unlink(discoveryOutputPath)
-            } catch {
-              // Ignore
-            }
-
             resolve({})
           } catch (e) {
             resolve({ error: e.message })
           }
-        }
-
-        const onSandbox = async () => {
-          cleanup()
-          // Check Docker availability
-          const dockerAvailable = await this._checkDocker()
-          if (!dockerAvailable) {
-            // Send Docker not available error — renderer will show retry/choose differently
-            win.webContents.send(IPC.DISCOVERY_ERROR, {
-              message: 'Sandbox mode requires Docker. Docker was not detected on this system.',
-              dockerRequired: true,
-            })
-            // Wait for retry or choose differently - set up new listeners
-            const onRetry = async () => {
-              win.webContents.removeListener('discovery:user-sandbox', onRetry)
-              win.webContents.removeListener('discovery:user-approve', onChooseDifferently)
-              win.webContents.removeListener('discovery:user-abort', onChooseDifferently)
-              const retryDocker = await this._checkDocker()
-              if (retryDocker) {
-                this.useSandboxMode = true
-                resolve({ sandbox: true })
-              } else {
-                // Still not available - send error again and re-listen
-                win.webContents.send(IPC.DISCOVERY_ERROR, {
-                  message: 'Sandbox mode requires Docker. Docker was not detected on this system.',
-                  dockerRequired: true,
-                })
-                win.webContents.once('discovery:user-sandbox', onRetry)
-                win.webContents.once('discovery:user-approve', onChooseDifferently)
-                win.webContents.once('discovery:user-abort', onChooseDifferently)
-              }
-            }
-            const onChooseDifferently = () => {
-              win.webContents.removeListener('discovery:user-sandbox', onRetry)
-              win.webContents.removeListener('discovery:user-approve', onChooseDifferently)
-              win.webContents.removeListener('discovery:user-abort', onChooseDifferently)
-              // Go back to choice phase - send complete event again to re-show the choice modal
-              win.webContents.send(IPC.DISCOVERY_COMPLETE, { delta })
-              // Set up listeners for the choice phase again
-              win.webContents.once('discovery:user-approve', onApprove)
-              win.webContents.once('discovery:user-sandbox', onSandbox)
-              win.webContents.once('discovery:user-abort', onAbort)
-            }
-            win.webContents.once('discovery:user-sandbox', onRetry)
-            win.webContents.once('discovery:user-approve', onChooseDifferently)
-            win.webContents.once('discovery:user-abort', onChooseDifferently)
-            return
-          }
-
-          this.useSandboxMode = true
-          resolve({ sandbox: true })
         }
 
         const onAbort = () => {
@@ -877,11 +899,11 @@ class PipelineRunner {
           resolve({ aborted: true })
         }
 
-        win.webContents.once('discovery:user-approve', onApprove)
-        win.webContents.once('discovery:user-sandbox', onSandbox)
-        win.webContents.once('discovery:user-abort', onAbort)
+        ipcMain.once('discovery:user-approve', onApprove)
+        ipcMain.once('discovery:user-abort', onAbort)
       })
     } catch (e) {
+      await ActivityLog.append(projectPath, `DEBUG: _runPreflight error: ${e.message}`, 'warn')
       return { error: e.message }
     }
   }
@@ -1022,7 +1044,7 @@ class PipelineRunner {
         run_id: new Date().toISOString(),
         pipeline: path.basename(projectPath),
         steps: checkpointSteps,
-        loop_count: 0,
+        loop_counts: {},
       })
 
       await ActivityLog.append(projectPath, `Pipeline reset complete - ${checkpointSteps.length} steps set to IDLE`, 'ok')

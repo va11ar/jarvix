@@ -1,11 +1,7 @@
 const { spawn } = require('child_process')
 const fs = require('fs/promises')
 const path = require('path')
-const { createPoller } = require('./FilePoller')
 const ActivityLog = require('./ActivityLog')
-
-// Discovery output file path relative to project
-const DISCOVERY_OUTPUT_SUBPATH = '.jarvix/discovery-output.json'
 
 // Hardcoded discovery prompt per §4.2 — do not modify
 const DISCOVERY_PROMPT = `You are performing a command discovery task only. Do not write any code. Do not modify any files.
@@ -13,12 +9,14 @@ const DISCOVERY_PROMPT = `You are performing a command discovery task only. Do n
 Read the documents provided. Based solely on their content, infer which shell commands a
 programmer agent will need to execute to implement the described project.
 
-Output a JSON array of shell command strings and nothing else. No explanation, no preamble,
-no markdown formatting. Example output format:
+Output ONLY a JSON array of shell command strings to stdout. No explanation, no preamble,
+no markdown formatting, no backticks. Example output:
 
 ["npm install", "npm run build", "npm test", "pip install -r requirements.txt"]
 
-If you cannot infer any commands from the documents, output an empty array: []`
+If you cannot infer any commands from the documents, output an empty array: []
+
+Output ONLY the JSON array — no other text before or after.`
 
 /**
  * Run the discovery agent to infer required shell commands
@@ -29,13 +27,7 @@ If you cannot infer any commands from the documents, output an empty array: []`
  * @throws {Error} On timeout, spawn failure, or malformed output
  */
 async function runDiscovery(projectPath, programmerAgent, qwenPath) {
-  const discoveryOutputPath = path.join(projectPath, DISCOVERY_OUTPUT_SUBPATH)
-  const jarvixDir = path.join(projectPath, '.jarvix')
-
   try {
-    // Ensure .jarvix directory exists
-    await fs.mkdir(jarvixDir, { recursive: true })
-
     // Collect input files per §4.1:
     // 1. Programmer agent's declared reads
     // 2. Context/architect.md (if exists)
@@ -73,17 +65,24 @@ async function runDiscovery(projectPath, programmerAgent, qwenPath) {
       // Doesn't exist — skip
     }
 
-    // Build the prompt: @/path/to/file references first, then the instruction prompt
-    const promptParts = []
-    for (const filePath of inputFiles) {
-      promptParts.push(`@${filePath}`)
-    }
-    promptParts.push(DISCOVERY_PROMPT)
-    const fullPrompt = promptParts.join('\n\n')
+    await ActivityLog.append(projectPath, `DEBUG: Collected ${inputFiles.length} input files for discovery`, 'warn')
 
-    // Write prompt to temp file (avoid CLI length limits)
-    const tempPromptPath = path.join(jarvixDir, 'discovery-prompt.txt')
-    await fs.writeFile(tempPromptPath, fullPrompt, 'utf8')
+    // Build the prompt: embed file contents first, then the instruction prompt
+    const promptParts = []
+
+    // Add content of each input file
+    for (const filePath of inputFiles) {
+      try {
+        const content = await fs.readFile(filePath, 'utf8')
+        const relativePath = path.relative(projectPath, filePath)
+        promptParts.push(`\n\n--- ${relativePath} ---\n\n${content}`)
+      } catch {
+        // File unreadable — skip
+      }
+    }
+
+    promptParts.push(DISCOVERY_PROMPT)
+    const fullPrompt = promptParts.join('')
 
     // Spawn Qwen CLI process per §4.3
     return await new Promise((resolve, reject) => {
@@ -92,8 +91,6 @@ async function runDiscovery(projectPath, programmerAgent, qwenPath) {
         fullPrompt,
         '--approval-mode',
         'auto-edit',
-        '--output-format',
-        'stream-json',
       ]
 
       const proc = spawn(qwenPath, qwenArgs, {
@@ -107,6 +104,7 @@ async function runDiscovery(projectPath, programmerAgent, qwenPath) {
       }
 
       let resolved = false
+      let stdoutData = ''
 
       const settle = async (result) => {
         if (resolved) return
@@ -124,12 +122,6 @@ async function runDiscovery(projectPath, programmerAgent, qwenPath) {
         }
 
         if (result.error) {
-          // Delete output file on failure so next run re-discovers
-          try {
-            await fs.unlink(discoveryOutputPath)
-          } catch {
-            // Doesn't exist or unreadable
-          }
           reject(new Error(result.error))
         } else {
           resolve(result)
@@ -141,19 +133,11 @@ async function runDiscovery(projectPath, programmerAgent, qwenPath) {
         settle({ error: 'Discovery timeout' })
       }, 60000)
 
-      // Handle stdout for errors
+      // Capture stdout
       proc.stdout.on('data', (data) => {
-        const lines = data.toString().split('\n').filter(Boolean)
-        for (const line of lines) {
-          try {
-            const json = JSON.parse(line)
-            if (json.type === 'error' || json.error) {
-              ActivityLog.append(projectPath, `Discovery error: ${json.error || json.message}`, 'error')
-            }
-          } catch {
-            // Not JSON — ignore
-          }
-        }
+        const text = data.toString()
+        stdoutData += text
+        ActivityLog.append(projectPath, `Discovery: ${text.trim()}`, 'info')
       })
 
       // Handle stderr
@@ -161,71 +145,48 @@ async function runDiscovery(projectPath, programmerAgent, qwenPath) {
         ActivityLog.append(projectPath, `Discovery stderr: ${data.toString().trim()}`, 'warn')
       })
 
-      // Process exited — poll for output file
+      // Process exited — parse stdout for JSON
       proc.on('close', async (code) => {
         if (resolved) return
+
+        await ActivityLog.append(projectPath, `DEBUG: Discovery process closed with code ${code}`, 'warn')
+        await ActivityLog.append(projectPath, `DEBUG: Captured stdout (${stdoutData.length} chars): ${stdoutData.substring(0, 500)}`, 'warn')
 
         if (code !== 0 && code !== null) {
           settle({ error: `Discovery process exited with code ${code}` })
           return
         }
 
-        // Poll for output file
-        const poller = createPoller(discoveryOutputPath, /^[\s\S]*$/, 2000)
-        let pollerRunning = true
-
-        const stopPoller = () => {
-          if (pollerRunning) {
-            poller.stop()
-            pollerRunning = false
+        // Parse JSON from stdout
+        try {
+          // Try to find JSON array in output
+          const jsonMatch = stdoutData.match(/\[[\s\S]*\]/)
+          if (!jsonMatch) {
+            settle({ error: 'No JSON array found in output' })
+            return
           }
+
+          const commands = JSON.parse(jsonMatch[0])
+
+          if (!Array.isArray(commands)) {
+            settle({ error: 'Parsed output is not a JSON array' })
+            return
+          }
+
+          // Validate all elements are strings
+          const valid = commands.every(cmd => typeof cmd === 'string')
+          if (!valid) {
+            settle({ error: 'Output contains non-string elements' })
+            return
+          }
+
+          await ActivityLog.append(projectPath, `DEBUG: Successfully parsed ${commands.length} commands`, 'warn')
+
+          clearTimeout(timeoutId)
+          settle({ commands })
+        } catch (e) {
+          settle({ error: `Failed to parse output: ${e.message}` })
         }
-
-        poller.start(async () => {
-          if (!pollerRunning) return
-          stopPoller()
-
-          try {
-            const content = await fs.readFile(discoveryOutputPath, 'utf8')
-            const commands = JSON.parse(content)
-
-            if (!Array.isArray(commands)) {
-              stopPoller()
-              settle({ error: 'Discovery output is not a JSON array' })
-              return
-            }
-
-            // Validate all elements are strings
-            const valid = commands.every(cmd => typeof cmd === 'string')
-            if (!valid) {
-              stopPoller()
-              settle({ error: 'Discovery output contains non-string elements' })
-              return
-            }
-
-            // Success — delete temp prompt file, keep output for now (deleted on approval or abort)
-            try {
-              await fs.unlink(tempPromptPath)
-            } catch {
-              // Ignore
-            }
-
-            clearTimeout(timeoutId)
-            stopPoller()
-            settle({ commands })
-          } catch (e) {
-            stopPoller()
-            settle({ error: `Failed to parse discovery output: ${e.message}` })
-          }
-        })
-
-        // Poller timeout (30s max for file to appear after process exit)
-        setTimeout(() => {
-          stopPoller()
-          if (!resolved) {
-            settle({ error: 'Discovery output file not found' })
-          }
-        }, 30000)
       })
 
       proc.on('error', (err) => {

@@ -43,9 +43,10 @@ const state = {
   editingAgentId: null,
 
   // Discovery pre-flight state per §10
-  preflightPhase: null, // null | 'loading' | 'choice' | 'sandbox-warning' | 'approve-list' | 'decline-warning'
+  preflightPhase: null, // null | 'loading' | 'choice' | 'sandbox-warning' | 'approve-list' | 'decline-warning' | 'discovery-error'
   preflightDelta: [],   // Discovered commands not in baseline
   preflightDockerError: false,
+  preflightErrorMessage: null,
 
   // Revision loop counts
   revisionLoopCounts: {},
@@ -1094,17 +1095,34 @@ function handlePipelineStatus(data) {
 // ─── Discovery Pre-flight Handlers ──────────────────────────────────────────
 
 function handleDiscoveryStarted() {
-  // State A — Loading screen
+  // State A — Loading screen (after user chose Infer Commands)
   state.preflightPhase = 'loading'
   state.preflightDockerError = false
   showOverlay('overlay-discovery')
 }
 
 function handleDiscoveryComplete(data) {
-  // State B — Pre-flight modal
   hideOverlay('overlay-discovery')
-  state.preflightPhase = 'choice'
   state.preflightDelta = data.delta || []
+  
+  // If delta is empty and we're not in loading phase, show choice modal (State B)
+  // If delta is empty and we were loading, discovery completed with no new commands - auto-approve
+  if (state.preflightDelta.length === 0) {
+    if (state.preflightPhase === 'loading') {
+      // Discovery just completed with no new commands - auto-approve
+      hideDialog('dialog-preflight')
+      hideOverlay('overlay-discovery')
+      appendLogLine('No new commands discovered — all required commands are already approved', 'info')
+      window.api.discoveryUserApprove()
+      return
+    }
+    // First time - show choice modal (State B)
+    state.preflightPhase = 'choice'
+  } else {
+    // Delta has commands - show approval list (State D)
+    state.preflightPhase = 'approve-list'
+  }
+  
   renderPreflightModal()
   showDialog('dialog-preflight')
 }
@@ -1112,7 +1130,8 @@ function handleDiscoveryComplete(data) {
 function handleDiscoveryError(data) {
   hideOverlay('overlay-discovery')
   state.preflightDockerError = !!data.dockerRequired
-  state.preflightPhase = data.dockerRequired ? 'sandbox-warning' : 'decline-warning'
+  state.preflightErrorMessage = data.message || 'An unexpected error occurred'
+  state.preflightPhase = data.dockerRequired ? 'sandbox-warning' : 'discovery-error'
   renderPreflightModal()
   showDialog('dialog-preflight')
 }
@@ -1138,6 +1157,9 @@ function renderPreflightModal() {
       break
     case 'decline-warning':
       renderPreflightDeclineWarning(body, footer, title)
+      break
+    case 'discovery-error':
+      renderPreflightDiscoveryError(body, footer, title)
       break
   }
 }
@@ -1173,8 +1195,8 @@ function renderPreflightChoice(body, footer, title) {
   inferBtn.className = 'footer-btn primary'
   inferBtn.textContent = 'Infer Commands'
   inferBtn.addEventListener('click', () => {
-    state.preflightPhase = 'approve-list'
-    renderPreflightModal()
+    hideDialog('dialog-preflight')
+    window.api.discoveryUserApprove()
   })
 
   footer.appendChild(sandboxBtn)
@@ -1243,9 +1265,11 @@ function renderPreflightSandboxWarning(body, footer, title) {
 
 function renderPreflightApproveList(body, footer, title) {
   title.textContent = 'Approve commands for the programmer agent'
+  console.log('DEBUG: renderPreflightApproveList called, delta length:', state.preflightDelta.length)
 
   if (state.preflightDelta.length === 0) {
     // All commands already approved — close modal and continue
+    console.log('DEBUG: Delta is empty, auto-approving')
     hideDialog('dialog-preflight')
     window.api.discoveryUserApprove()
     return
@@ -1313,6 +1337,34 @@ function renderPreflightDeclineWarning(body, footer, title) {
   })
 
   footer.appendChild(approveBtn)
+  footer.appendChild(abortBtn)
+}
+
+function renderPreflightDiscoveryError(body, footer, title) {
+  title.textContent = 'Discovery failed'
+
+  body.innerHTML = `
+    <p style="color:var(--text-dim);line-height:1.6;margin-bottom:16px;">
+      An error occurred while analyzing your project documents:
+    </p>
+    <div style="background:var(--bg3);border:1px solid var(--border);padding:12px;border-radius:4px;margin-bottom:16px;">
+      <code style="color:var(--text);font-family:var(--font-mono);font-size:11px;">
+        ${escapeHtml(state.preflightErrorMessage || 'Unknown error')}
+      </code>
+    </div>
+    <p style="color:var(--text-dim);line-height:1.6;">
+      The pipeline cannot continue without command discovery. You need to abort and fix the issue.
+    </p>
+  `
+
+  const abortBtn = document.createElement('button')
+  abortBtn.className = 'footer-btn primary'
+  abortBtn.textContent = 'Abort Pipeline'
+  abortBtn.addEventListener('click', () => {
+    window.api.discoveryUserAbort()
+    hideDialog('dialog-preflight')
+  })
+
   footer.appendChild(abortBtn)
 }
 

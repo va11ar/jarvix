@@ -74,7 +74,7 @@ async function createInitial(projectPath, runId, pipelineName, steps) {
       completed_at: null,
       status: STEP_STATUSES.IDLE,
     })),
-    loop_count: 0,
+    loop_counts: {}, // Per-agent loop counts: { agentId: count }
   }
   await save(projectPath, checkpoint)
 }
@@ -97,17 +97,30 @@ async function updateStep(projectPath, stepIndex, updates) {
 }
 
 /**
- * Increment loop count
+ * Increment loop count for a specific reviewer agent
  * @param {string} projectPath - Project path
- * @returns {Promise<number>} - New count
+ * @param {string} agentId - The reviewer agent's ID
+ * @returns {Promise<number>} - New count for this agent
  */
-async function incrementLoopCount(projectPath) {
+async function incrementLoopCount(projectPath, agentId) {
   const checkpoint = await load(projectPath)
   if (!checkpoint) return 0
 
-  checkpoint.loop_count = (checkpoint.loop_count || 0) + 1
+  if (!checkpoint.loop_counts) {
+    // Migrate from old single loop_count to per-agent loop_counts
+    checkpoint.loop_counts = {}
+    if (checkpoint.loop_count) {
+      // Preserve old count for backward compatibility
+      checkpoint.loop_counts.migrated = checkpoint.loop_count
+    }
+    delete checkpoint.loop_count
+  }
+  if (!checkpoint.loop_counts[agentId]) {
+    checkpoint.loop_counts[agentId] = 0
+  }
+  checkpoint.loop_counts[agentId]++
   await save(projectPath, checkpoint)
-  return checkpoint.loop_count
+  return checkpoint.loop_counts[agentId]
 }
 
 module.exports = { load, save, detect, createInitial, updateStep, incrementLoopCount }

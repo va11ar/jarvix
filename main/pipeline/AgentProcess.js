@@ -23,6 +23,8 @@ class AgentProcess {
     this.exitCode = null
     this.status = null // PIPELINE_STATUS value
     this.exitReason = null
+    this._completionPromise = null
+    this._completionResolve = null
   }
 
   /**
@@ -31,6 +33,11 @@ class AgentProcess {
    */
   async spawn() {
     try {
+      // Create completion promise for efficient waiting
+      this._completionPromise = new Promise((resolve) => {
+        this._completionResolve = resolve
+      })
+
       // Write merged settings.json for this agent
       await this._writeAgentSettings()
 
@@ -115,11 +122,17 @@ class AgentProcess {
       this.process.on('exit', (code) => {
         this.exitCode = code
         this._cleanup()
+        if (this._completionResolve) {
+          this._completionResolve({ exitCode: this.exitCode, status: this.status, exitReason: this.exitReason })
+        }
       })
 
       this.process.on('error', (err) => {
         this.exitReason = err.message
         this._cleanup()
+        if (this._completionResolve) {
+          this._completionResolve({ exitCode: this.exitCode, status: this.status, exitReason: this.exitReason })
+        }
       })
 
       // Start polling the output file for PIPELINE_STATUS
@@ -127,6 +140,9 @@ class AgentProcess {
       this.poller.on('match', (fullMatch) => {
         this.status = fullMatch.trim()
         this._cleanup()
+        if (this._completionResolve) {
+          this._completionResolve({ exitCode: this.exitCode, status: this.status, exitReason: this.exitReason })
+        }
       })
       this.poller.on('error', () => {
         // File doesn't exist yet — continue polling
@@ -138,6 +154,9 @@ class AgentProcess {
         this.exitReason = 'timeout'
         ActivityLog.append(this.projectPath, `Agent timed out after ${this.agent.timeout_seconds}s`, 'warn')
         this._cleanup()
+        if (this._completionResolve) {
+          this._completionResolve({ exitCode: this.exitCode, status: this.status, exitReason: this.exitReason })
+        }
       }, timeoutMs)
 
       return { ok: true }
@@ -166,20 +185,15 @@ class AgentProcess {
    * @returns {Promise<{exitCode: number|null, status: string|null, exitReason?: string}>}
    */
   async waitForCompletion() {
-    return new Promise((resolve) => {
-      const checkComplete = () => {
-        if (this.exitCode !== null || this.status || this.exitReason) {
-          resolve({
-            exitCode: this.exitCode,
-            status: this.status,
-            exitReason: this.exitReason,
-          })
-        } else {
-          setImmediate(checkComplete)
-        }
+    if (!this._completionPromise) {
+      // Already completed or never spawned
+      return {
+        exitCode: this.exitCode,
+        status: this.status,
+        exitReason: this.exitReason,
       }
-      checkComplete()
-    })
+    }
+    return await this._completionPromise
   }
 
   /**
@@ -205,6 +219,11 @@ class AgentProcess {
       // Process already dead
     }
 
+    // Set exitReason and resolve completion promise to stop waitForCompletion()
+    this.exitReason = 'killed'
+    if (this._completionResolve) {
+      this._completionResolve({ exitCode: this.exitCode, status: this.status, exitReason: this.exitReason })
+    }
     await this._restoreProjectSettings()
     this._cleanup()
   }
