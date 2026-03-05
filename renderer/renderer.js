@@ -43,7 +43,7 @@ const state = {
   editingAgentId: null,
 
   // Discovery pre-flight state per §10
-  preflightPhase: null, // null | 'loading' | 'choice' | 'sandbox-warning' | 'approve-list' | 'decline-warning' | 'discovery-error'
+  preflightPhase: null, // null | 'loading' | 'choice' | 'sandbox-warning' | 'approve-list' | 'decline-warning' | 'discovery-error' | 'no-commands'
   preflightDelta: [],   // Discovered commands not in baseline
   preflightDockerError: false,
   preflightErrorMessage: null,
@@ -1125,16 +1125,16 @@ function handleDiscoveryStarted() {
 function handleDiscoveryComplete(data) {
   hideOverlay('overlay-discovery')
   state.preflightDelta = data.delta || []
-  
+
   // If delta is empty and we're not in loading phase, show choice modal (State B)
-  // If delta is empty and we were loading, discovery completed with no new commands - auto-approve
+  // If delta is empty and we were loading, discovery completed with no new commands
+  // — show confirmation modal for user to acknowledge and proceed
   if (state.preflightDelta.length === 0) {
     if (state.preflightPhase === 'loading') {
-      // Discovery just completed with no new commands - auto-approve
-      hideDialog('dialog-preflight')
-      hideOverlay('overlay-discovery')
-      appendLogLine('No new commands discovered — all required commands are already approved', 'info')
-      window.api.discoveryUserApprove()
+      // Discovery just completed with no new commands - show confirmation
+      state.preflightPhase = 'no-commands'
+      renderPreflightModal()
+      showDialog('dialog-preflight')
       return
     }
     // First time - show choice modal (State B)
@@ -1143,7 +1143,7 @@ function handleDiscoveryComplete(data) {
     // Delta has commands - show approval list (State D)
     state.preflightPhase = 'approve-list'
   }
-  
+
   renderPreflightModal()
   showDialog('dialog-preflight')
 }
@@ -1181,6 +1181,9 @@ function renderPreflightModal() {
       break
     case 'discovery-error':
       renderPreflightDiscoveryError(body, footer, title)
+      break
+    case 'no-commands':
+      renderPreflightNoCommands(body, footer, title)
       break
   }
 }
@@ -1282,6 +1285,30 @@ function renderPreflightSandboxWarning(body, footer, title) {
     footer.appendChild(continueBtn)
     footer.appendChild(backBtn)
   }
+}
+
+function renderPreflightNoCommands(body, footer, title) {
+  title.textContent = 'No extra commands required'
+
+  body.innerHTML = `
+    <p style="color:var(--text-dim);line-height:1.6;margin-bottom:16px;">
+      Discovery completed. All commands required by the programmer agent are already
+      approved in your project whitelist.
+    </p>
+    <p style="color:var(--text-dim);line-height:1.6;">
+      Click OK to proceed with the pipeline.
+    </p>
+  `
+
+  const okBtn = document.createElement('button')
+  okBtn.className = 'footer-btn primary'
+  okBtn.textContent = 'OK'
+  okBtn.addEventListener('click', () => {
+    window.api.discoveryUserApprove()
+    hideDialog('dialog-preflight')
+  })
+
+  footer.appendChild(okBtn)
 }
 
 function renderPreflightApproveList(body, footer, title) {
