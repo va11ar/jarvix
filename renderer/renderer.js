@@ -243,6 +243,27 @@ function wireEventListeners() {
     }
   })
 
+  // Agent Role dropdown change handler
+  document.getElementById('detail-agent-role').addEventListener('change', async (e) => {
+    const agent = getSelectedAgent()
+    if (!agent) return
+
+    const role = e.target.value === '' ? null : e.target.value
+
+    try {
+      const result = await window.api.updateAgentRole(agent.id, role)
+      if (result.error) {
+        appendLogLine('Failed to update agent role: ' + result.error, 'error')
+        return
+      }
+      // Update local state
+      agent.role = role
+      appendLogLine(`Updated ${agent.name} role to ${role || 'Regular'}`, 'info')
+    } catch (e) {
+      appendLogLine('Failed to update agent role: ' + e.message, 'error')
+    }
+  })
+
   // Max Loops Count input change handler
   document.getElementById('detail-max-loops-input').addEventListener('change', async (e) => {
     const agent = getSelectedAgent()
@@ -1950,6 +1971,16 @@ function updateLoopConfigUI(agent) {
   }
 }
 
+/**
+ * Update Role dropdown UI based on agent's role
+ * @param {Object} agent - Agent object
+ */
+function updateRoleUI(agent) {
+  const roleSelect = document.getElementById('detail-agent-role')
+  // Set dropdown value: empty string for null/undefined role
+  roleSelect.value = agent.role || ''
+}
+
 function selectLibraryAgent(agent) {
   // Clear pipeline selection
   state.selectedNodeIndex = -1
@@ -1987,11 +2018,13 @@ async function updateDetailPanel(libraryAgent = null) {
 
       // Update Reviewer Status dropdown and related fields
       updateLoopConfigUI(agent)
+      // Update Role dropdown
+      updateRoleUI(agent)
 
       // Hide progress bar for library agents
       document.getElementById('progress-fill').style.width = '0%'
       document.getElementById('progress-text').textContent = 'Step 0 of 0'
-      
+
       // Review section - show if agent is a reviewer (has loop.type)
       const reviewSection = document.getElementById('review-section')
       const isReviewer = agent.loop && agent.loop.type
@@ -2029,6 +2062,9 @@ async function updateDetailPanel(libraryAgent = null) {
     document.getElementById('detail-max-loops-label').classList.add('hidden')
     document.getElementById('detail-max-loops-val').classList.add('hidden')
 
+    // Reset Role dropdown to Regular
+    document.getElementById('detail-agent-role').value = ''
+
     document.getElementById('agent-output').innerHTML = '<div class="output-placeholder">Select an agent to view output</div>'
     return
   }
@@ -2049,6 +2085,8 @@ async function updateDetailPanel(libraryAgent = null) {
 
   // Update Reviewer Status dropdown and related fields
   updateLoopConfigUI(agent)
+  // Update Role dropdown
+  updateRoleUI(agent)
 
   document.getElementById('detail-timeout').textContent = agent ? `${agent.timeout_seconds}s` : '—'
   document.getElementById('detail-reads').textContent = agent?.reads?.length ? `${agent.reads.length} files` : 'None'
@@ -2129,6 +2167,7 @@ function updateAgentControls() {
   const continueBtn = document.getElementById('btn-continue')
   const killBtn = document.getElementById('btn-kill-agent')
   const editOutputBtn = document.getElementById('btn-edit-output')
+  const roleSelect = document.getElementById('detail-agent-role')
 
   // Continue only when paused at transition
   if (continueBtn) {
@@ -2148,7 +2187,7 @@ function updateAgentControls() {
     const hasOutput = state.agentOutputs.get(selectedAgentId)
     const hasSelection = state.selectedNodeIndex !== -1
     const isRunning = state.pipelineState === 'running'
-    
+
     if (!hasSelection) {
       // No agent selected: hide the button
       editOutputBtn.classList.add('hidden')
@@ -2161,6 +2200,13 @@ function updateAgentControls() {
       editOutputBtn.classList.remove('hidden')
       editOutputBtn.disabled = !hasOutput
     }
+  }
+
+  // Role dropdown: disabled when pipeline is running or in error state
+  if (roleSelect) {
+    const isRunning = state.pipelineState === 'running'
+    const isError = state.pipelineState === 'error'
+    roleSelect.disabled = isRunning || isError
   }
 }
 

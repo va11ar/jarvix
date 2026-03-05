@@ -57,8 +57,10 @@ async function parseAgentFile(filePath) {
     timeout_seconds: meta.timeout_seconds || 300,
     allowedCommands: Array.isArray(meta.allowedCommands) ? meta.allowedCommands : [],
     excludedCommands: Array.isArray(meta.excludedCommands) ? meta.excludedCommands : [],
-    // Agent role — only 'programmer' triggers pre-flight discovery. Any other value is treated as null.
-    role: meta.role === 'programmer' ? 'programmer' : null,
+    // Agent role — 'producer' triggers pre-flight discovery and Output folder injection.
+    // 'producer-reviewer' triggers Output folder injection for reviewers.
+    // null or omitted = Regular agent (no special behavior).
+    role: (meta.role === 'producer' || meta.role === 'producer-reviewer') ? meta.role : null,
     prompt,
   }
 }
@@ -113,7 +115,7 @@ async function readAssignedUuid(filePath) {
  * @param {Object} definition - Agent definition
  * @returns {Promise<{id: string, filePath: string}>}
  */
-async function create({ name, reads, review_target, loop, timeout_seconds, allowedCommands, excludedCommands, prompt }) {
+async function create({ name, reads, review_target, loop, timeout_seconds, allowedCommands, excludedCommands, role, prompt }) {
   const AGENTS_DIR = await getAgentsDir()
   const id = crypto.randomUUID()
   const safeName = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
@@ -128,6 +130,7 @@ async function create({ name, reads, review_target, loop, timeout_seconds, allow
     timeout_seconds: timeout_seconds || 300,
     allowedCommands: allowedCommands || [],
     excludedCommands: excludedCommands || [],
+    role: role || null,
   }).trim()
 
   const content = `---\n# DO NOT EDIT — app identifier\n${frontMatter}\n---\n\n${prompt || ''}`
@@ -434,4 +437,58 @@ async function updateLoopConfig(agentId, loopType, maxRevisionLoops) {
   }
 }
 
-module.exports = { parseAgentFile, create, createBoilerplate, list, getById, usageCount, updateReviewTarget, updateLoopConfig }
+/**
+ * Update an agent's role field
+ * @param {string} agentId - Agent ID
+ * @param {string|null} role - Role value: 'producer', 'producer-reviewer', or null
+ * @returns {Promise<{ok: boolean, error?: string}>}
+ */
+async function updateRole(agentId, role) {
+  const agent = await getById(agentId)
+  if (!agent) {
+    return { error: 'Agent not found' }
+  }
+
+  try {
+    const raw = await fs.readFile(agent.filePath, 'utf8')
+    const fmMatch = raw.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n([\s\S]*)$/m)
+    if (!fmMatch) {
+      return { error: 'Agent file missing YAML front matter' }
+    }
+
+    const meta = yaml.load(fmMatch[1])
+    const prompt = fmMatch[2].trim()
+
+    // Update role field — null or omitted = Regular agent
+    if (role === null || role === '' || role === 'null') {
+      // Remove role field for Regular agents
+      delete meta.role
+    } else {
+      meta.role = role
+    }
+
+    // Rebuild front matter
+    const frontMatter = yaml.dump({
+      id: meta.id,
+      name: meta.name,
+      reads: meta.reads || [],
+      review_target: meta.review_target || null,
+      loop: meta.loop || null,
+      timeout_seconds: meta.timeout_seconds || 300,
+      allowedCommands: meta.allowedCommands || [],
+      excludedCommands: meta.excludedCommands || [],
+      role: meta.role || null,
+    }).trim()
+
+    const hasComment = fmMatch[1].includes('# DO NOT EDIT')
+    const comment = hasComment ? '' : '# DO NOT EDIT — app identifier\n'
+    const content = `---\n${comment}${frontMatter}\n---\n\n${prompt}`
+
+    await fs.writeFile(agent.filePath, content, 'utf8')
+    return { ok: true }
+  } catch (e) {
+    return { error: e.message }
+  }
+}
+
+module.exports = { parseAgentFile, create, createBoilerplate, list, getById, usageCount, updateReviewTarget, updateLoopConfig, updateRole }

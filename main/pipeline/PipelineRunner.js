@@ -25,7 +25,7 @@ class PipelineRunner {
     this.pausePromise = null
     this.resumeCallback = null
     // Pre-flight discovery state per §8
-    this.programmerStepIndex = null
+    this.producerStepIndex = null
     this.commandDiscoveryDone = false
     this.useSandboxMode = false
     this.discoveryCommands = null
@@ -144,18 +144,18 @@ class PipelineRunner {
         }
       }
 
-      // Find the first programmer step index per §3
-      this.programmerStepIndex = null
+      // Find the first producer step index per §3
+      this.producerStepIndex = null
       for (let i = 0; i < this.steps.length; i++) {
         const agent = this.agentSnapshots.get(this.steps[i].agent_id)
-        if (agent && agent.role === AGENT_ROLES.PROGRAMMER) {
-          this.programmerStepIndex = i
-          await ActivityLog.append(this.currentProjectPath, `DEBUG: Found programmer agent at step index ${i} (${agent.name})`, 'warn')
+        if (agent && agent.role === AGENT_ROLES.PRODUCER) {
+          this.producerStepIndex = i
+          await ActivityLog.append(this.currentProjectPath, `DEBUG: Found producer agent at step index ${i} (${agent.name})`, 'warn')
           break
         }
       }
-      if (this.programmerStepIndex === null) {
-        await ActivityLog.append(this.currentProjectPath, 'DEBUG: No programmer agent found in pipeline', 'warn')
+      if (this.producerStepIndex === null) {
+        await ActivityLog.append(this.currentProjectPath, 'DEBUG: No producer agent found in pipeline', 'warn')
       }
 
       // Reset discovery state for this run
@@ -267,7 +267,7 @@ class PipelineRunner {
       const step = this.steps[i]
       const agent = this.agentSnapshots.get(step.agent_id)
 
-      await ActivityLog.append(this.currentProjectPath, `DEBUG: Processing step ${i}, agent=${agent?.name}, role=${agent?.role}, programmerStepIndex=${this.programmerStepIndex}, commandDiscoveryDone=${this.commandDiscoveryDone}`, 'warn')
+      await ActivityLog.append(this.currentProjectPath, `DEBUG: Processing step ${i}, agent=${agent?.name}, role=${agent?.role}, producerStepIndex=${this.producerStepIndex}, commandDiscoveryDone=${this.commandDiscoveryDone}`, 'warn')
 
       if (!agent) {
         await ActivityLog.append(this.currentProjectPath, `Agent not found: ${step.agent_id}`, 'error')
@@ -286,8 +286,8 @@ class PipelineRunner {
         continue
       }
 
-      // Pre-flight hook for programmer agent per §3 and §8
-      if (i === this.programmerStepIndex && !this.commandDiscoveryDone) {
+      // Pre-flight hook for producer agent per §3 and §8
+      if (i === this.producerStepIndex && !this.commandDiscoveryDone) {
         const preflightResult = await this._runPreflight(agent)
         this.commandDiscoveryDone = true
         await ActivityLog.append(this.currentProjectPath, `Pre-flight completed`, 'info')

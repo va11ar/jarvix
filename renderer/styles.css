@@ -722,6 +722,47 @@ html, body {
 .meta-val.complete { color: var(--green); }
 .meta-val.error { color: var(--red); }
 
+/* Agent Role section (stacked layout) */
+.agent-role-section {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+}
+.agent-role-label {
+  font-size: 9px;
+  color: var(--text-faint);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  margin-bottom: 4px;
+}
+
+/* Agent Role dropdown in detail panel */
+.agent-role-select {
+  appearance: none;
+  -webkit-appearance: none;
+  background: var(--bg2);
+  border: 1px solid var(--border2);
+  border-radius: 3px;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 4px 28px 4px 8px;
+  cursor: pointer;
+  width: 100%;
+  box-sizing: border-box;
+}
+.agent-role-select:hover {
+  border-color: var(--border);
+}
+.agent-role-select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.agent-role-select option {
+  background: var(--bg2);
+  color: var(--text);
+}
+
 /* Reviewer Status section (stacked layout) */
 .reviewer-status-section {
   margin-top: 6px;

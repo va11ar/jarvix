@@ -64,8 +64,31 @@ class AgentProcess {
         }
       }
 
-      // Append the injected footer
+      // Get output file name for injection
       const outputFileName = path.basename(this.outputFilePath)
+
+      // Inject Output folder instructions for producer and producer-reviewer roles
+      if (this.agent.role === 'producer') {
+        const outputFolderPrompt = `\n\nOUTPUT FOLDER INSTRUCTIONS:
+All artifacts you create (code files, articles, images, or any other deliverables) 
+must be written to the Output/ folder in the project root. Do not write artifacts 
+to the project root or Context/ folder.
+
+When you need to read existing artifacts to iterate on feedback, read them from 
+the Output/ folder.
+
+Your progress tracking file (Context/${outputFileName}) stays in the Context/ folder — 
+only user-facing artifacts go to Output/.`
+        promptParts.push(outputFolderPrompt)
+      } else if (this.agent.role === 'producer-reviewer') {
+        const reviewerPrompt = `\n\nREVIEWER ARTIFACT LOCATION:
+When reviewing the target agent's work, read all artifacts from the Output/ folder.
+The target agent's progress file (Context/${outputFileName}) remains in Context/ for 
+tracking purposes.`
+        promptParts.push(reviewerPrompt)
+      }
+
+      // Append the injected footer
       // Output path is relative to Qwen's cwd (projectPath), so just Context/filename
       const outputRelativePath = `Context/${outputFileName}`
       const footerPrompt = `\n\nYou must write your complete output to \`${outputRelativePath}\`. Use your file writing tools to do this — do not print your output to the terminal.\n\nThe very last line of the file you write must be exactly one of:\n\n\`PIPELINE_STATUS: DONE | ISSUES: false\` — task complete, no issues found\n\n\`PIPELINE_STATUS: DONE | ISSUES: true\` — task complete, issues found (review agents only)\n\n\`PIPELINE_STATUS: ERROR | REASON: <brief description>\` — task could not be completed\n\nDo not omit this line. Do not paraphrase it. Do not add anything after it.`

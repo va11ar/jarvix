@@ -19,9 +19,13 @@ const STEP_STATUSES = {
   SKIPPED: 'skipped',
 }
 
-// Agent roles — used to trigger pre-flight behaviours
+// Agent roles — used to trigger pre-flight behaviours and Output folder injection
+// Regular: no role field (null) — standard agent behavior
+// Producer: role: 'producer' — produces artifacts to Output/, triggers pre-flight discovery
+// Producer Reviewer: role: 'producer-reviewer' — reviews artifacts from Output/
 const AGENT_ROLES = {
-  PROGRAMMER: 'programmer',
+  PRODUCER: 'producer',
+  PRODUCER_REVIEWER: 'producer-reviewer',
 }
 
 // IPC channel names — never hardcode these inline

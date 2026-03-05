@@ -17,6 +17,7 @@ contextBridge.exposeInMainWorld('api', {
   openAgentEditor: (agentId) => ipcRenderer.invoke('agents:open-editor', { agentId }),
   updateAgentReviewTarget: (agentId, reviewTargetId) => ipcRenderer.invoke('agents:update-review-target', { agentId, reviewTargetId }),
   updateLoopConfig: (agentId, loopType, maxRevisionLoops) => ipcRenderer.invoke('agents:update-loop-config', { agentId, loopType, maxRevisionLoops }),
+  updateAgentRole: (agentId, role) => ipcRenderer.invoke('agents:update-role', { agentId, role }),
 
   // First Launch
   checkFirstLaunch: () => ipcRenderer.invoke('first-launch:check'),

@@ -40,6 +40,7 @@ function registerIpcHandlers(win) {
   ipcMain.handle('agents:open-editor', h(({ agentId }) => AgentEditor.open(agentId, win)))
   ipcMain.handle('agents:update-review-target', h(({ agentId, reviewTargetId }) => AgentLibrary.updateReviewTarget(agentId, reviewTargetId)))
   ipcMain.handle('agents:update-loop-config', h(({ agentId, loopType, maxRevisionLoops }) => AgentLibrary.updateLoopConfig(agentId, loopType, maxRevisionLoops)))
+  ipcMain.handle('agents:update-role', h(({ agentId, role }) => AgentLibrary.updateRole(agentId, role)))
 
   // ── First Launch ─────────────────────────────────────────────────────────
   ipcMain.handle('first-launch:check', h(async () => {
