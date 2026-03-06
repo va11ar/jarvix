@@ -20,8 +20,8 @@
   --red-dim:    #4a2222;
   --yellow:     #a89060;
   --yellow-dim: #4a3e28;
-  --amber:      #6b9ab8;
-  --amber-dim:  #1e3348;
+  --amber:      #c8923a;
+  --amber-dim:  #3d2910;
   --orange:     #d48a5a;
   --orange-dim: #4a2f1e;
   --select-source-border:   #c4a050;
@@ -114,10 +114,13 @@ html, body {
   color: var(--text);
   font-weight: 500;
   cursor: pointer;
+  border-bottom: 1px dashed var(--border2);
+  transition: color 0.15s, border-color 0.15s;
 }
 
 .tb-project span:hover {
   color: var(--accent);
+  border-bottom-color: var(--accent-dim);
 }
 
 .tb-project-tooltip {
@@ -143,6 +146,8 @@ html, body {
   height: 100%;
   flex-shrink: 0;
   -webkit-app-region: no-drag;
+  margin-left: auto;
+  margin-right: auto;
 }
 
 .tb-btn {
@@ -164,6 +169,20 @@ html, body {
 .tb-btn:hover {
   background: var(--bg3);
   border-color: var(--border2);
+  color: var(--text);
+}
+#btn-start {
+  width: auto;
+  padding: 0 12px;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  border: 1px solid var(--accent-dim);
+  color: var(--accent);
+}
+#btn-start:hover {
+  background: var(--accent-dim);
+  border-color: var(--accent);
   color: var(--text);
 }
 .tb-btn.start:hover { color: var(--green); border-color: var(--green-dim); }
@@ -273,11 +292,11 @@ html, body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 6px 10px 3px;
+  padding: 0 10px 0;
 }
 
 .section-label {
-  padding: 0;
+  padding: 6px 10px 3px;
   font-size: 9px;
   letter-spacing: 0.14em;
   text-transform: uppercase;
@@ -363,15 +382,6 @@ html, body {
 }
 .agent-item.complete .agent-name { color: var(--text-dim); }
 .agent-item.skipped  .agent-name { color: var(--text-dim); text-decoration: line-through; }
-
-.agent-running-label {
-  font-size: 9px;
-  font-weight: 600;
-  color: var(--amber);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  flex-shrink: 0;
-}
 
 .agent-state-tag {
   font-size: 9px;
@@ -493,7 +503,6 @@ html, body {
   flex-direction: column;
   overflow: hidden;
   position: relative;
-  border-right: 1px solid var(--border);
 }
 
 #canvas-inner {
@@ -505,6 +514,7 @@ html, body {
   padding: 0 28px;
   gap: 0;
   position: relative;
+  border-top: 1px solid var(--border);
 }
 
 #canvas-inner::before {
@@ -560,6 +570,11 @@ html, body {
 .pipeline-node.skipped  { border-color: var(--yellow-dim); opacity: 0.55; }
 .pipeline-node.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent-dim); }
 
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.4; }
+}
+
 @keyframes node-pulse {
   0%, 100% { box-shadow: 0 0 6px -2px var(--amber-dim); }
   50%       { box-shadow: 0 0 12px -2px var(--amber); }
@@ -608,9 +623,10 @@ html, body {
 .pipeline-node.idle     .node-state-bar { background: var(--border); }
 
 .connector {
-  width: 36px;
+  width: 56px;
   flex-shrink: 0;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
   position: relative;
@@ -620,27 +636,28 @@ html, body {
   height: 1px;
   flex: 1;
   background: var(--border2);
+  width: 100%;
 }
 .connector-arrow {
-  color: var(--border2);
-  font-size: 14px;
+  color: var(--text-dim);
+  font-size: 20px;
+  font-weight: 600;
   line-height: 1;
-  margin-left: -3px;
+  margin-left: -4px;
 }
 .connector.active .connector-line  { background: var(--amber); }
 .connector.active .connector-arrow { color: var(--amber); }
-.connector.done   .connector-line  { background: var(--green-dim); }
-.connector.done   .connector-arrow { color: var(--green-dim); }
+.connector.done   .connector-line  { background: var(--green); }
+.connector.done   .connector-arrow { color: var(--green); }
 
 .connector.revision-link {
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
 }
 .connector.revision-link .connector-line {
-  position: absolute;
-  left: 0;
-  right: 0;
+  position: relative;
   flex: none;
   background: var(--yellow);
 }
@@ -651,9 +668,7 @@ html, body {
 }
 
 .connector.revision-link.active .connector-line {
-  position: absolute;
-  left: 0;
-  right: 0;
+  position: relative;
   flex: none;
   background: var(--amber);
 }
@@ -663,26 +678,44 @@ html, body {
   font-weight: 600;
 }
 
-.connector-loop-count {
-  position: absolute;
-  top: calc(100% + 4px);
-  left: 50%;
-  transform: translateX(-50%);
-  font-size: 9px;
-  color: var(--text-dim);
-  letter-spacing: 0.05em;
-  white-space: nowrap;
-  pointer-events: none;
+.connector-pips-container {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 3px;
+  margin-top: 4px;
+  max-width: 100%;
 }
-.connector.revision-link.active .connector-loop-count { color: var(--yellow); }
+.connector-pip {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--bg3);
+  border: 1px solid var(--border2);
+  flex-shrink: 0;
+}
+.connector-pip.done { background: var(--green-dim); border-color: var(--green); }
+.connector-pip.active { background: var(--amber-dim); border-color: var(--amber); animation: pulse 1.4s ease-in-out infinite; }
 
 /* ─── COL 3: DETAIL ─────────────────────────────────────── */
 #col-detail {
-  width: 210px;
-  min-width: 210px;
+  width: 280px;
+  min-width: 280px;
   background: var(--bg1);
   display: flex;
   flex-direction: column;
+  overflow: hidden;
+  border-left: 1px solid var(--border);
+  transition: width 0.18s ease, min-width 0.18s ease, opacity 0.18s ease;
+  opacity: 1;
+}
+
+#col-detail.collapsed {
+  width: 0;
+  min-width: 0;
+  opacity: 0;
+  pointer-events: none;
+  border-left: none;
   overflow: hidden;
 }
 
@@ -835,6 +868,15 @@ html, body {
   display: none !important;
 }
 
+.pipeline-progress-section {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  background: var(--bg1);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
 .progress-section {
   padding: 8px 12px;
   border-bottom: 1px solid var(--border);
@@ -865,28 +907,6 @@ html, body {
   margin-top: 3px;
 }
 
-.review-section {
-  padding: 7px 12px;
-  border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
-}
-.pips {
-  display: flex;
-  gap: 4px;
-  align-items: center;
-  margin-top: 4px;
-}
-.pip {
-  width: 10px;
-  height: 10px;
-  border-radius: 2px;
-  background: var(--bg3);
-  border: 1px solid var(--border2);
-}
-.pip.done { background: var(--green-dim); border-color: var(--green); }
-.pip.active { background: var(--amber-dim); border-color: var(--amber); animation: pulse 1.4s ease-in-out infinite; }
-.pip.fail { background: var(--red-dim); border-color: var(--red); }
-
 /* Indeterminate spinner for iteration loop type */
 .pip-spinner {
   width: 14px;
@@ -899,24 +919,6 @@ html, body {
 
 @keyframes spin {
   to { transform: rotate(360deg); }
-}
-
-#agent-output {
-  flex: 1;
-  overflow-y: auto;
-  padding: 10px 12px;
-  font-size: 10px;
-  line-height: 1.7;
-  color: var(--text-dim);
-  font-family: var(--mono);
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-.output-placeholder {
-  color: var(--text-faint);
-  font-size: 10px;
-  text-align: center;
-  padding-top: 40px;
 }
 
 #agent-controls {
@@ -955,9 +957,22 @@ html, body {
 .agent-btn.danger::before  { color: var(--red-dim); }
 
 /* ─── ACTIVITY LOG ──────────────────────────────────────── */
+#log-resize-handle {
+  height: 4px;
+  background: transparent;
+  cursor: ns-resize;
+  flex-shrink: 0;
+  transition: background 0.1s;
+}
+#log-resize-handle:hover,
+#log-resize-handle.dragging {
+  background: var(--accent-dim);
+}
+
 #activity-log {
-  height: 110px;
-  min-height: 110px;
+  height: 140px;
+  min-height: 72px;
+  max-height: 40vh;
   border-top: 1px solid var(--border);
   background: var(--bg1);
   display: flex;
@@ -1056,8 +1071,7 @@ html, body {
   width: 5px;
   height: 5px;
   border-radius: 50%;
-  background: var(--amber);
-  animation: pulse 1.4s ease-in-out infinite;
+  background: var(--text-faint);
 }
 
 /* ─── SCROLLBARS ────────────────────────────────────────── */
@@ -1730,7 +1744,6 @@ select:disabled {
   gap: 10px;
   padding: 6px 14px;
   background: var(--select-source-dim);
-  border-bottom: 1px solid var(--select-source-border);
   font-size: 10px;
   color: var(--yellow);
   letter-spacing: 0.05em;

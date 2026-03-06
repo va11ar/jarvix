@@ -979,9 +979,18 @@ class PipelineRunner {
         await ActivityLog.append(projectPath, 'Pipeline is running - aborting before reset', 'warn')
         await this.abort()
       }
-      
+
       // Ensure abort controller is reset
       this.abortController = null
+
+      // Verify the path is a known registered project before deleting anything
+      const registered = await ProjectManager.listAll()
+      const isKnown = registered.some(
+        p => path.resolve(p.projectPath) === path.resolve(projectPath)
+      )
+      if (!isKnown) {
+        return { error: 'Cannot reset an unregistered project path' }
+      }
 
       await ActivityLog.append(projectPath, 'Pipeline reset requested - clearing Context/ and Output/', 'warn')
 

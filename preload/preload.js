@@ -43,9 +43,12 @@ contextBridge.exposeInMainWorld('api', {
   cancelAgentChanges: (agentId) => ipcRenderer.invoke('editor:cancel-changes', { agentId }),
 
   // Context file I/O
-  readContextFile: (filePath) => ipcRenderer.invoke('context:read', { filePath }),
-  contextListFiles: (dirPath) => ipcRenderer.invoke('context:list', { dirPath }),
-  writeContextFile: (filePath, content) => ipcRenderer.invoke('context:write', { filePath, content }),
+  readContextFile: (filePath, projectPath) =>
+    ipcRenderer.invoke('context:read', { filePath, projectPath }),
+  contextListFiles: (dirPath, projectPath) =>
+    ipcRenderer.invoke('context:list', { dirPath, projectPath }),
+  writeContextFile: (filePath, content, projectPath) =>
+    ipcRenderer.invoke('context:write', { filePath, content, projectPath }),
   getAgentOutputPath: (projectPath, agentFilePath) =>
     ipcRenderer.invoke('context:agent-output-path', { projectPath, agentFilePath }),
   openAgentOutput: (projectPath, agentFilePath) =>
