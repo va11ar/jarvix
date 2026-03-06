@@ -21,6 +21,17 @@ function createWindow() {
   })
 
   win.loadFile(path.join(__dirname, '../renderer/index.html'))
+
+  // Block renderer-initiated navigation away from the app's local file
+  win.webContents.on('will-navigate', (event, url) => {
+    if (!url.startsWith('file://')) {
+      event.preventDefault()
+    }
+  })
+
+  // Deny all programmatic new-window opens from renderer
+  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+
   registerIpcHandlers(win)
 
   // Forward focus events to renderer for editor change detection

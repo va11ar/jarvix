@@ -415,6 +415,23 @@
     </div>
   </div>
 
+  <!-- OAuth Warning Dialog -->
+  <div class="overlay hidden" id="dialog-oauth-warning">
+    <div class="dialog" style="width:480px;">
+      <div class="dialog-header">
+        <div class="dialog-title">OAuth Authentication Notice</div>
+      </div>
+      <div class="dialog-body" style="padding:16px;">
+        <p style="color:var(--text-dim);line-height:1.6;">
+          Using OAuth authentication requires you to run Qwen Code independent of Jarvix first to initiate the authentication flow since the way Jarvix runs Qwen Code won't allow an interaction directly which prevents normal OAuth.
+        </p>
+      </div>
+      <div class="dialog-footer">
+        <button class="footer-btn primary" id="btn-oauth-warning-ok">OK</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Auth Setup Dialog -->
   <div class="overlay hidden" id="dialog-auth-setup">
     <div class="dialog" style="width:480px;">

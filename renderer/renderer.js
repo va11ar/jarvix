@@ -1219,8 +1219,15 @@ function renderPreflightChoice(body, footer, title) {
       any command inside a sandboxed environment. Sandbox mode uses Docker to isolate the agent
       from your system. Note: sandbox mode requires Docker to be running, and while it provides
       meaningful protection, it is not a complete safety net.
+      <a id="approval-mode-link" href="#" style="color:var(--accent);text-decoration:none;">Read more here.</a>
     </p>
   `
+
+  const approvalModeLink = document.getElementById('approval-mode-link')
+  approvalModeLink.addEventListener('click', (e) => {
+    e.preventDefault()
+    window.api.openExternal('https://qwenlm.github.io/qwen-code-docs/en/users/features/approval-mode/')
+  })
 
   const sandboxBtn = document.createElement('button')
   sandboxBtn.className = 'footer-btn'
@@ -1706,7 +1713,7 @@ function renderPipelineAgents() {
     item.innerHTML = `
       ${runningIndicator}
       <div class="agent-name-wrapper">
-        <div class="agent-name">${agentName}</div>
+        <div class="agent-name">${escapeHtml(agentName)}</div>
       </div>
       <div class="agent-state-tag">${stateTag}</div>
     `
@@ -1815,7 +1822,7 @@ function renderLibraryAgents() {
     }
     item.innerHTML = `
       <div class="library-agent-dot"></div>
-      <div class="library-agent-name">${agent.name}</div>
+      <div class="library-agent-name">${escapeHtml(agent.name)}</div>
       <div class="library-agent-usage">—</div>
     `
     item.addEventListener('click', () => selectLibraryAgent(agent))
@@ -1888,7 +1895,7 @@ function renderPipelineCanvas() {
 
     node.innerHTML = `
       <div class="node-index">${String(index + 1).padStart(2, '0')}</div>
-      <div class="node-name">${agentName}</div>
+      <div class="node-name">${escapeHtml(agentName)}</div>
       <div class="node-status">${statusText}</div>
       <div class="node-state-bar"></div>
     `
@@ -3419,14 +3426,14 @@ async function archiveIncompleteAgentOutput(step) {
 
   try {
     const outputPath = await window.api.getAgentOutputPath(state.currentProject.projectPath, agent.filePath)
-    const content = await window.api.readContextFile(outputPath)
+    const content = await window.api.readContextFile(outputPath, state.currentProject.projectPath)
 
     // Only archive if there's content
     if (content && content.trim().length > 0) {
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5) // YYYY-MM-DDTHH-MM-SS
       const archivedPath = outputPath.replace(/\.md$/, `.${timestamp}.archived.md`)
 
-      await window.api.writeContextFile(archivedPath, content)
+      await window.api.writeContextFile(archivedPath, content, state.currentProject.projectPath)
       appendLogLine(`Archived incomplete output for "${step.agent_name}" to ${archivedPath.split('/').pop()}`, 'warn')
     }
   } catch (e) {
@@ -3597,19 +3604,26 @@ function wireNewProjectDialog() {
     settingsAuthTestPassed = false
     updateSettingsOkButton(false)
   })
-  
+
   // OAuth checkbox for settings dialog
   document.getElementById('settings-auth-oauth-checkbox').addEventListener('change', () => {
     updateOAuthFields('settings-auth')
-    // When OAuth is enabled, enable OK button; when disabled, require test
+    // When OAuth is enabled, show warning dialog first
     const oauthEnabled = document.getElementById('settings-auth-oauth-checkbox').checked
     if (oauthEnabled) {
-      settingsAuthTestPassed = true
-      updateSettingsOkButton(true)
+      // Show warning dialog
+      showDialog('dialog-oauth-warning')
     } else {
       settingsAuthTestPassed = false
       updateSettingsOkButton(false)
     }
+  })
+
+  // OAuth warning dialog - OK button
+  document.getElementById('btn-oauth-warning-ok').addEventListener('click', () => {
+    hideDialog('dialog-oauth-warning')
+    settingsAuthTestPassed = true
+    updateSettingsOkButton(true)
   })
 }
 

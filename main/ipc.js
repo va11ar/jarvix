@@ -15,6 +15,14 @@ const h = (fn) => async (_, ...args) => {
   try { return await fn(...args) } catch (e) { return { error: e.message } }
 }
 
+function assertProjectPath(filePath, projectPath) {
+  const resolved = path.resolve(filePath)
+  const base = path.resolve(projectPath)
+  if (resolved !== base && !resolved.startsWith(base + path.sep)) {
+    throw new Error(`Path outside project directory: ${filePath}`)
+  }
+}
+
 function registerIpcHandlers(win) {
   // ── Project ──────────────────────────────────────────────────────────────
   ipcMain.handle('project:create',       h((args) => ProjectManager.create(args)))
@@ -92,9 +100,16 @@ function registerIpcHandlers(win) {
   ipcMain.handle('editor:cancel-changes', h(({ agentId }) => AgentEditor.cancelChanges(agentId)))
 
   // ── Context file I/O ─────────────────────────────────────────────────────
-  ipcMain.handle('context:read',  h(({ filePath }) => fs.readFile(filePath, 'utf8').catch(() => '')))
-  ipcMain.handle('context:list',  h(({ dirPath }) => fs.readdir(dirPath).catch(() => [])))
-  ipcMain.handle('context:write', h(async ({ filePath, content }) => {
+  ipcMain.handle('context:read', h(({ filePath, projectPath }) => {
+    if (projectPath) assertProjectPath(filePath, projectPath)
+    return fs.readFile(filePath, 'utf8').catch(() => '')
+  }))
+  ipcMain.handle('context:list', h(({ dirPath, projectPath }) => {
+    if (projectPath) assertProjectPath(dirPath, projectPath)
+    return fs.readdir(dirPath).catch(() => [])
+  }))
+  ipcMain.handle('context:write', h(async ({ filePath, content, projectPath }) => {
+    if (projectPath) assertProjectPath(filePath, projectPath)
     await fs.writeFile(filePath, content, 'utf8')
     return { ok: true }
   }))
@@ -184,7 +199,12 @@ function registerIpcHandlers(win) {
   ipcMain.handle('window:close',    h(() => win.close()))
 
   // ── External ─────────────────────────────────────────────────────────────
-  ipcMain.handle('external:open', h((url) => shell.openExternal(url)))
+  ipcMain.handle('external:open', h((url) => {
+    if (typeof url !== 'string' || !url.startsWith('https://')) {
+      throw new Error('Only https:// URLs may be opened externally')
+    }
+    return shell.openExternal(url)
+  }))
 }
 
 module.exports = { registerIpcHandlers }

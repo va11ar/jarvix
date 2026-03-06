@@ -118,7 +118,20 @@ tracking purposes.`
         cwd: this.projectPath,
         detached: true,
         stdio: ['ignore', 'pipe', 'pipe'],
-        env: { ...process.env, HOME: os.homedir() },
+        env: (() => {
+          const e = {
+            PATH: process.env.PATH,
+            HOME: os.homedir(),
+            TMPDIR: process.env.TMPDIR || (process.platform === 'win32' ? process.env.TEMP : '/tmp'),
+            USER: process.env.USER || process.env.USERNAME,
+            SHELL: process.env.SHELL,
+            LANG: process.env.LANG,
+            TERM: process.env.TERM,
+          }
+          // Remove keys with undefined values — passing undefined to a child process env causes errors
+          Object.keys(e).forEach(k => { if (e[k] === undefined) delete e[k] })
+          return e
+        })(),
       })
 
       // Handle stdout for errors
