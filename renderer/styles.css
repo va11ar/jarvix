@@ -697,6 +697,30 @@ html, body {
 .connector-pip.done { background: var(--green-dim); border-color: var(--green); }
 .connector-pip.active { background: var(--amber-dim); border-color: var(--amber); animation: pulse 1.4s ease-in-out infinite; }
 
+/* Iteration loop pip - capsule shape with count label */
+.iteration-pip-wrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+.iteration-pip {
+  width: 10px;
+  height: 5px;
+  border-radius: 3px;
+  background: var(--bg3);
+  border: 1px solid var(--border2);
+  flex-shrink: 0;
+}
+.iteration-pip.done { background: var(--green-dim); border-color: var(--green); }
+.iteration-pip.active { background: var(--amber-dim); border-color: var(--amber); animation: pulse 1.4s ease-in-out infinite; }
+.iteration-pip-count {
+  font-size: 8px;
+  font-family: var(--mono);
+  color: var(--text-faint);
+  line-height: 1;
+}
+
 /* ─── COL 3: DETAIL ─────────────────────────────────────── */
 #col-detail {
   width: 280px;

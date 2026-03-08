@@ -2042,28 +2042,54 @@ function renderPipelineCanvas() {
         connector.appendChild(line)
         connector.appendChild(arrow)
 
-        // Add pips container for revision loops (bounded), not iteration (unbounded)
-        if (loopType === 'revision') {
+        // Add pips container for revision loops (bounded) and iteration loops (unbounded)
+        if (loopType === 'revision' || loopType === 'iteration') {
           const pipsContainer = document.createElement('div')
           pipsContainer.className = 'connector-pips-container'
           pipsContainer.dataset.agentId = nextStep.agent_id
           pipsContainer.dataset.maxLoops = maxLoops
+          pipsContainer.dataset.loopType = loopType
 
-          // Render pips
-          // If reviewer step is complete, all pips up to currentLoop are done (no active)
-          // If reviewer step is running, the currentLoop pip is active
-          const isReviewerComplete = reviewerStatus === 'complete'
-          for (let i = 1; i <= maxLoops; i++) {
+          if (loopType === 'revision') {
+            // Render multiple pips for revision loops
+            // If reviewer step is complete, all pips up to currentLoop are done (no active)
+            // If reviewer step is running, the currentLoop pip is active
+            const isReviewerComplete = reviewerStatus === 'complete'
+            for (let i = 1; i <= maxLoops; i++) {
+              const pip = document.createElement('div')
+              pip.className = 'connector-pip'
+              if (i <= currentLoop && isReviewerComplete) {
+                pip.classList.add('done')
+              } else if (i < currentLoop) {
+                pip.classList.add('done')
+              } else if (i === currentLoop && !isReviewerComplete) {
+                pip.classList.add('active')
+              }
+              pipsContainer.appendChild(pip)
+            }
+          } else {
+            // Render single capsule pip + count for iteration loops
+            const pipWrapper = document.createElement('div')
+            pipWrapper.className = 'iteration-pip-wrapper'
+
             const pip = document.createElement('div')
-            pip.className = 'connector-pip'
-            if (i <= currentLoop && isReviewerComplete) {
+            pip.className = 'connector-pip iteration-pip'
+            // Same state logic as revision pips
+            const isReviewerComplete = reviewerStatus === 'complete'
+            if (currentLoop > 0 && isReviewerComplete) {
               pip.classList.add('done')
-            } else if (i < currentLoop) {
-              pip.classList.add('done')
-            } else if (i === currentLoop && !isReviewerComplete) {
+            } else if (currentLoop > 0 && !isReviewerComplete) {
               pip.classList.add('active')
             }
-            pipsContainer.appendChild(pip)
+            // If currentLoop === 0, pip has no class (colorless)
+
+            const countLabel = document.createElement('div')
+            countLabel.className = 'iteration-pip-count'
+            countLabel.textContent = currentLoop > 0 ? `+${currentLoop}` : ''
+
+            pipWrapper.appendChild(pip)
+            pipWrapper.appendChild(countLabel)
+            pipsContainer.appendChild(pipWrapper)
           }
 
           connector.appendChild(pipsContainer)
@@ -2369,22 +2395,54 @@ function updateReviewPips(agentId, loopCount, maxLoops, loopType) {
   const pipsContainer = document.querySelector(`.connector-pips-container[data-agent-id="${agentId}"]`)
   if (!pipsContainer) return
 
-  // Update the max loops dataset
+  // Update the max loops and loop type dataset
   pipsContainer.dataset.maxLoops = maxLoops
+  pipsContainer.dataset.loopType = loopType
+
+  // Find the reviewer step to check its status
+  const reviewerStep = state.pipelineSteps.find(s => s.agent_id === agentId)
+  const isReviewerComplete = reviewerStep && reviewerStep.status === 'complete'
 
   if (loopType === 'iteration') {
-    // Indeterminate mode: show spinner, no pips
-    pipsContainer.innerHTML = '<div class="pip-spinner"></div>'
-  } else {
-    // Revision mode: show pips
-    pipsContainer.innerHTML = ''
-    for (let i = 1; i <= maxLoops; i++) {
-      const pip = document.createElement('div')
-      pip.className = 'connector-pip'
-      if (i < loopCount) pip.classList.add('done')
-      else if (i === loopCount) pip.classList.add('active')
-      pipsContainer.appendChild(pip)
+    // Iteration mode: update single capsule pip + count
+    const pipWrapper = pipsContainer.querySelector('.iteration-pip-wrapper')
+    if (pipWrapper) {
+      const pip = pipWrapper.querySelector('.iteration-pip')
+      const countLabel = pipWrapper.querySelector('.iteration-pip-count')
+      
+      if (pip && countLabel) {
+        // Reset classes
+        pip.classList.remove('done', 'active')
+        
+        // Apply state based on loop count and reviewer status
+        if (loopCount > 0) {
+          if (isReviewerComplete) {
+            pip.classList.add('done')
+          } else {
+            pip.classList.add('active')
+          }
+        }
+        
+        // Update count label
+        countLabel.textContent = `+${loopCount}`
+      }
     }
+  } else {
+    // Revision mode: update multiple pips
+    const pips = pipsContainer.querySelectorAll('.connector-pip')
+    pips.forEach((pip, index) => {
+      const pipNumber = index + 1
+      pip.classList.remove('done', 'active')
+      if (pipNumber < loopCount) {
+        pip.classList.add('done')
+      } else if (pipNumber === loopCount) {
+        if (isReviewerComplete) {
+          pip.classList.add('done')
+        } else {
+          pip.classList.add('active')
+        }
+      }
+    })
   }
 }
 

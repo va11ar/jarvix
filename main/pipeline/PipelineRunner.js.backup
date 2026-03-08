@@ -482,7 +482,7 @@ class PipelineRunner {
         if (!skipRouting) {
           const hasIssues = settleResult.status && settleResult.status.includes('ISSUES: true')
 
-          // Read screenshot directory for hasScreenshots check
+          // Read screenshot directory — treat missing directory as no screenshots
           let screenshotFiles = []
           try {
             screenshotFiles = (await fs.readdir(path.join(this.currentProjectPath, 'Context', 'screenshots'))).filter(f => f.endsWith('.png'))
