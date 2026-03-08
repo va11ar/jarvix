@@ -11,6 +11,7 @@ const ProjectManager = require('../project/ProjectManager')
 const Settings = require('../settings')
 const { spawn } = require('child_process')
 const fs = require('fs/promises')
+const { registerQaHotkey, unregisterQaHotkey } = require('../qaHotkey')
 
 class PipelineRunner {
   constructor() {
@@ -20,6 +21,7 @@ class PipelineRunner {
     this.steps = []
     this.currentStepIndex = -1
     this.currentAgentProcess = null
+    this.currentAgent = null  // The active AgentProcess instance, or null when idle
     this.agentSnapshots = new Map() // agentId -> agent definition at pipeline start
     this.abortController = null
     this.pausePromise = null
@@ -29,6 +31,7 @@ class PipelineRunner {
     this.commandDiscoveryDone = false
     this.useSandboxMode = false
     this.discoveryCommands = null
+    this.qaLoopActive = false
   }
 
   /**
@@ -162,6 +165,7 @@ class PipelineRunner {
       this.commandDiscoveryDone = false
       this.useSandboxMode = false
       this.discoveryCommands = null
+      this.qaLoopActive = false
 
       // Determine starting step
       let startIndex = 0
@@ -312,10 +316,6 @@ class PipelineRunner {
         started_at: new Date().toISOString(),
       })
 
-      // Log agent start
-      await ActivityLog.append(this.currentProjectPath, `${agent.name} started`, 'info')
-      this._notifyStatus()
-
       // Get output file path
       const outputFileName = path.basename(agent.filePath, '.md') + '.md'
       const outputFilePath = path.join(this.currentProjectPath, 'Context', outputFileName)
@@ -327,11 +327,16 @@ class PipelineRunner {
         // File doesn't exist - that's fine
       }
 
+      // Log agent start
+      await ActivityLog.append(this.currentProjectPath, `${agent.name} started`, 'info')
+      await ActivityLog.append(this.currentProjectPath, `Expected output file: ${outputFilePath}`, 'info')
+      this._notifyStatus()
+
       // Spawn agent — use sandbox mode if pre-flight selected it
       // Also check if OAuth is enabled
       const settings = await Settings.load()
       const oauthEnabled = !!settings.oauthEnabled
-      
+
       this.currentAgentProcess = new AgentProcess(
         agent,
         this.currentProjectPath,
@@ -340,27 +345,199 @@ class PipelineRunner {
         this.useSandboxMode,
         oauthEnabled
       )
-      const spawnResult = await this.currentAgentProcess.spawn()
+      this.currentAgent = this.currentAgentProcess
 
-      if (!spawnResult.ok) {
-        await ActivityLog.append(this.currentProjectPath, `Failed to spawn agent: ${spawnResult.error}`, 'error')
-        this.state = PIPELINE_STATES.ERROR
-        await Checkpoint.updateStep(this.currentProjectPath, i, {
-          status: STEP_STATUSES.ERROR,
-          completed_at: new Date().toISOString(),
+      // QA agent branch
+      const isQaAgent = agent.role === 'qa'
+      let settleResult
+
+      if (isQaAgent) {
+        // QA Pre-flight pause: ask user to launch their app before QA agent starts
+        const win = this.currentWin
+        const projectPath = this.currentProjectPath
+
+        // Send notification to renderer to show pre-flight dialog
+        win.webContents.send(IPC.QA_PREFLIGHT_SHOW)
+
+        // Wait for user response via IPC
+        await new Promise((resolve, reject) => {
+          const cleanup = () => {
+            ipcMain.removeListener(IPC.QA_PREFLIGHT_READY, onReady)
+            ipcMain.removeListener(IPC.QA_PREFLIGHT_ABORT, onAbort)
+          }
+
+          const onReady = () => {
+            cleanup()
+            resolve()
+          }
+
+          const onAbort = () => {
+            cleanup()
+            reject(new Error('User aborted QA pre-flight'))
+          }
+
+          ipcMain.once(IPC.QA_PREFLIGHT_READY, onReady)
+          ipcMain.once(IPC.QA_PREFLIGHT_ABORT, onAbort)
         })
-        this._notifyStatus()
-        return
+
+        // Instructions dialog pause: show QA instructions if not seen before
+        const projectJson = JSON.parse(
+          await fs.readFile(path.join(projectPath, 'project.json'), 'utf8')
+        )
+
+        if (projectJson.qaInstructionsSeen !== true) {
+          await new Promise((resolve) => {
+            win.webContents.send(IPC.QA_INSTRUCTIONS_SHOW)
+            ipcMain.once(IPC.QA_INSTRUCTIONS_CONFIRM, resolve)
+          })
+        }
+
+        // Wire up QA events
+        this.currentAgentProcess.on('qa:waiting-for-user', () => {
+          registerQaHotkey(this.currentWin)
+          this.currentWin.webContents.send('pipeline:status', {
+            state:            PIPELINE_STATES.WAITING_FOR_USER,
+            agentId:          agent.id,
+            isQaAgent:        true,
+            currentStepIndex: this.currentStepIndex,
+            steps:            this.steps.map((step, idx) => {
+              const agentSnap = this.agentSnapshots.get(step.agent_id)
+              return {
+                ...step,
+                agent_name:    agentSnap?.name || 'Unknown',
+                status:        step.status || STEP_STATUSES.IDLE,
+                loop:          agentSnap?.loop || null,
+                review_target: agentSnap?.review_target || null,
+              }
+            }),
+          })
+        })
+
+        this.currentAgentProcess.on('qa:teardown-complete', () => {
+          unregisterQaHotkey()
+        })
+
+        // Spawn QA agent (includes MCP server setup)
+        const spawnResult = await this.currentAgentProcess._spawnQaAgent()
+        if (!spawnResult.ok) {
+          await ActivityLog.append(this.currentProjectPath, `Failed to spawn QA agent: ${spawnResult.error}`, 'error')
+          this.state = PIPELINE_STATES.ERROR
+          await Checkpoint.updateStep(this.currentProjectPath, i, {
+            status: STEP_STATUSES.ERROR,
+            completed_at: new Date().toISOString(),
+          })
+          this._notifyStatus()
+          this.currentAgent = null
+          return
+        }
+
+        // Wait for completion (same as normal flow)
+        const result = await this.currentAgentProcess.waitForCompletion()
+
+        // Teardown QA agent
+        await this.currentAgentProcess._teardownQaAgent()
+        settleResult = result
+        this.currentAgentProcess = null
+        this.currentAgent = null
+      } else {
+        // Normal agent flow
+        const extraReads = this.qaLoopActive
+          ? [path.join(this.currentProjectPath, 'Context', 'qa-report.md')]
+          : []
+        const spawnResult = await this.currentAgentProcess.spawn(extraReads)
+
+        if (!spawnResult.ok) {
+          await ActivityLog.append(this.currentProjectPath, `Failed to spawn agent: ${spawnResult.error}`, 'error')
+          this.state = PIPELINE_STATES.ERROR
+          await Checkpoint.updateStep(this.currentProjectPath, i, {
+            status: STEP_STATUSES.ERROR,
+            completed_at: new Date().toISOString(),
+          })
+          this._notifyStatus()
+          this.currentAgent = null
+          return
+        }
+
+        // Wait for completion
+        const result = await this.currentAgentProcess.waitForCompletion()
+
+        // Settle (restore settings)
+        settleResult = await this.currentAgentProcess.settle()
+        this.currentAgentProcess = null
+        this.currentAgent = null
+
+        // Reset qaLoopActive after producer completes during a QA loop re-run
+        if (agent.role === AGENT_ROLES.PRODUCER && this.qaLoopActive) {
+          this.qaLoopActive = false
+        }
       }
 
-      // Wait for completion
-      const result = await this.currentAgentProcess.waitForCompletion()
+      // QA routing logic — route back to nearest preceding producer if issues found
+      if (isQaAgent) {
+        // Guard: only run this block if QA completed without error
+        const skipRouting = settleResult.exitReason === 'timeout' ||
+          (settleResult.exitCode !== 0 && !settleResult.status) ||
+          (settleResult.status && settleResult.status.includes('ERROR'))
 
-      // Settle (restore settings)
-      const settleResult = await this.currentAgentProcess.settle()
-      this.currentAgentProcess = null
+        if (!skipRouting) {
+          const hasIssues = settleResult.status && settleResult.status.includes('ISSUES: true')
 
-      // Determine outcome
+          // Read screenshot directory — treat missing directory as no screenshots
+          let screenshotFiles = []
+          try {
+            screenshotFiles = (await fs.readdir(path.join(this.currentProjectPath, 'Context', 'screenshots'))).filter(f => f.endsWith('.png'))
+          } catch {
+            screenshotFiles = []
+          }
+          const hasScreenshots = screenshotFiles.length > 0
+
+          // Find nearest preceding producer step
+          // NOTE: role lives on the agent snapshot, not on the step object.
+          let nearestProducerIndex = -1
+          for (let j = i - 1; j >= 0; j--) {
+            if (this.agentSnapshots.get(this.steps[j].agent_id)?.role === AGENT_ROLES.PRODUCER) {
+              nearestProducerIndex = j
+              break
+            }
+          }
+
+          if (nearestProducerIndex !== -1) {
+            if (hasIssues) {
+              if (!hasScreenshots) {
+                // Case B: Agent found issues, user took no screenshots
+                // Prompt user for confirmation via modal
+                const userConfirmed = await this._showQaRoutingConfirmation(this.currentWin)
+                if (!userConfirmed) {
+                  // User said No — update checkpoint directly and continue to next step.
+                  await Checkpoint.updateStep(this.currentProjectPath, i, {
+                    status: STEP_STATUSES.SKIPPED,
+                    completed_at: new Date().toISOString(),
+                  })
+                  this.steps[i].status = STEP_STATUSES.SKIPPED
+                  await ActivityLog.append(this.currentProjectPath, 'QA routing declined by user — continuing pipeline', 'warn')
+                  this._notifyStatus()
+                  continue  // skip outcome block and review loop block
+                }
+              }
+
+              // Route back to producer (with or without screenshots)
+              this.qaLoopActive = true
+              this.steps[nearestProducerIndex].status = STEP_STATUSES.IDLE
+              await Checkpoint.updateStep(this.currentProjectPath, nearestProducerIndex, {
+                status: STEP_STATUSES.IDLE,
+                completed_at: null,
+              })
+              await ActivityLog.append(this.currentProjectPath, `${agent.name} — routing back to producer for fixes`, 'warn')
+              this._notifyStatus()
+              i = nearestProducerIndex - 1  // will be incremented by for loop
+              continue  // skip outcome block and review loop block
+            }
+          }
+          // hasIssues is false — fall through to outcome block
+        }
+      }
+
+      // Determine outcome (shared by both QA and normal agents)
       let stepStatus = STEP_STATUSES.COMPLETE
       let logType = 'ok'
 
@@ -386,6 +563,17 @@ class PipelineRunner {
           }
         }
         await ActivityLog.append(this.currentProjectPath, `${agent.name} completed`, logType)
+      } else if (!settleResult.status) {
+        // Agent exited without writing PIPELINE_STATUS line
+        stepStatus = STEP_STATUSES.ERROR
+        logType = 'error'
+        const exitInfo = settleResult.exitCode !== null ? `exited with code ${settleResult.exitCode}` : 'exited unexpectedly'
+        await ActivityLog.append(this.currentProjectPath, `${agent.name} ${exitInfo} without writing status - output file missing or malformed`, logType)
+      } else {
+        // Agent wrote an unexpected status line
+        stepStatus = STEP_STATUSES.ERROR
+        logType = 'error'
+        await ActivityLog.append(this.currentProjectPath, `${agent.name} wrote unexpected status: ${settleResult.status}`, logType)
       }
 
       // Update in-memory status
@@ -450,6 +638,7 @@ class PipelineRunner {
 
       if (stepStatus !== STEP_STATUSES.COMPLETE) {
         this.state = PIPELINE_STATES.ERROR
+        this._notifyStatus()
         return
       }
     }
@@ -1062,6 +1251,25 @@ class PipelineRunner {
     } catch (e) {
       return { error: e.message }
     }
+  }
+
+  /**
+   * Show QA routing confirmation modal and wait for user response
+   * @param {BrowserWindow} win - BrowserWindow instance
+   * @returns {Promise<boolean>} - true if user confirmed, false otherwise
+   */
+  _showQaRoutingConfirmation(win) {
+    return new Promise((resolve) => {
+      const cleanup = () => {
+        ipcMain.removeListener(IPC.QA_ROUTING_CONFIRM_YES, onYes)
+        ipcMain.removeListener(IPC.QA_ROUTING_CONFIRM_NO, onNo)
+      }
+      const onYes = () => { cleanup(); resolve(true) }
+      const onNo  = () => { cleanup(); resolve(false) }
+      ipcMain.once(IPC.QA_ROUTING_CONFIRM_YES, onYes)
+      ipcMain.once(IPC.QA_ROUTING_CONFIRM_NO,  onNo)
+      win.webContents.send(IPC.QA_ROUTING_CONFIRM_SHOW)
+    })
   }
 
   /**

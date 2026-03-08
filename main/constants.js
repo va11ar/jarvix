@@ -8,6 +8,7 @@ const PIPELINE_STATES = {
   PAUSED: 'paused',
   ERROR: 'error',
   COMPLETE: 'complete',
+  WAITING_FOR_USER: 'waiting-for-user',
 }
 
 // Individual step status values
@@ -111,6 +112,25 @@ const IPC = {
   DISCOVERY_USER_APPROVE: 'discovery:user-approve',
   DISCOVERY_USER_SANDBOX: 'discovery:user-sandbox',
   DISCOVERY_USER_ABORT: 'discovery:user-abort',
+
+  // QA MCP
+  QA_USER_DONE: 'qa:user-done',
+  QA_USER_ALL_GOOD: 'qa:user-all-good',
+  QA_HOTKEY_REREGISTER: 'qa:hotkey-reregister',
+  QA_SCREENSHOT_TAKEN: 'qa:screenshot-taken',
+  QA_REQUEST_NOTE: 'qa:request-note',
+  QA_SUBMIT_NOTE: 'qa:submit-note',
+  QA_CANCEL_NOTE: 'qa:cancel-note',
+
+  // QA Pre-flight dialogs
+  QA_PREFLIGHT_SHOW:      'qa:preflight-show',
+  QA_PREFLIGHT_READY:     'qa:preflight-ready',
+  QA_PREFLIGHT_ABORT:     'qa:preflight-abort',
+  QA_INSTRUCTIONS_SHOW:   'qa:instructions-show',
+  QA_INSTRUCTIONS_CONFIRM:'qa:instructions-confirm',
+  QA_ROUTING_CONFIRM_SHOW:   'qa:routing-confirm-show',
+  QA_ROUTING_CONFIRM_YES:    'qa:routing-confirm-yes',
+  QA_ROUTING_CONFIRM_NO:     'qa:routing-confirm-no',
 }
 
 // Hardcoded exclude list — always written into .qwen/settings.json tools.exclude

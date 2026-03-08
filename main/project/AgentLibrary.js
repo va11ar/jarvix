@@ -59,8 +59,9 @@ async function parseAgentFile(filePath) {
     excludedCommands: Array.isArray(meta.excludedCommands) ? meta.excludedCommands : [],
     // Agent role — 'producer' triggers pre-flight discovery and Output folder injection.
     // 'producer-reviewer' triggers Output folder injection for reviewers.
+    // 'qa' triggers QA MCP integration.
     // null or omitted = Regular agent (no special behavior).
-    role: (meta.role === 'producer' || meta.role === 'producer-reviewer') ? meta.role : null,
+    role: (meta.role === 'producer' || meta.role === 'producer-reviewer' || meta.role === 'qa') ? meta.role : null,
     prompt,
   }
 }
@@ -87,6 +88,7 @@ async function assignUuidIfMissing(filePath, raw, fmMatch, meta, prompt) {
     timeout_seconds: meta.timeout_seconds || 300,
     allowedCommands: meta.allowedCommands || [],
     excludedCommands: meta.excludedCommands || [],
+    role: meta.role || null,
   }).trim()
 
   // Preserve the original comment if present, otherwise add the standard comment
@@ -172,6 +174,7 @@ async function createBoilerplate({ name, reads, review_target, loop, timeout_sec
     timeout_seconds: timeout_seconds || 300,
     allowedCommands: allowedCommands || [],
     excludedCommands: excludedCommands || [],
+    role: role || null,
   }).trim()
 
   // Boilerplate content with helpful comments
@@ -295,6 +298,7 @@ async function reassignUuid(filePath, newId) {
     timeout_seconds: meta.timeout_seconds || 300,
     allowedCommands: meta.allowedCommands || [],
     excludedCommands: meta.excludedCommands || [],
+    role: meta.role || null,
   }).trim()
 
   const hasComment = fmMatch[1].includes('# DO NOT EDIT')
@@ -363,6 +367,7 @@ async function updateReviewTarget(agentId, reviewTargetId) {
       timeout_seconds: meta.timeout_seconds || 300,
       allowedCommands: meta.allowedCommands || [],
       excludedCommands: meta.excludedCommands || [],
+      role: meta.role || null,
     }).trim()
 
     const hasComment = fmMatch[1].includes('# DO NOT EDIT')
@@ -424,6 +429,7 @@ async function updateLoopConfig(agentId, loopType, maxRevisionLoops) {
       timeout_seconds: meta.timeout_seconds || 300,
       allowedCommands: meta.allowedCommands || [],
       excludedCommands: meta.excludedCommands || [],
+      role: meta.role || null,
     }).trim()
 
     const hasComment = fmMatch[1].includes('# DO NOT EDIT')
@@ -440,7 +446,7 @@ async function updateLoopConfig(agentId, loopType, maxRevisionLoops) {
 /**
  * Update an agent's role field
  * @param {string} agentId - Agent ID
- * @param {string|null} role - Role value: 'producer', 'producer-reviewer', or null
+ * @param {string|null} role - Role value: 'producer', 'producer-reviewer', 'qa', or null
  * @returns {Promise<{ok: boolean, error?: string}>}
  */
 async function updateRole(agentId, role) {

@@ -47,6 +47,10 @@ const state = {
 
   // Revision loop counts
   revisionLoopCounts: {},
+
+  // QA MCP state
+  activeAgentIsQa: false,
+  qaPreflightVisible: false,
 }
 
 const NP_STEP_SUBTITLES = [
@@ -131,6 +135,30 @@ function setupIPCListeners() {
   window.api.onQwenNotFound((data) => {
     handleQwenNotFound(data)
   })
+
+  // QA MCP listeners
+  window.api.onQaRequestNote(() => {
+    handleQaRequestNote()
+  })
+
+  window.api.onQaScreenshot((data) => {
+    handleQaScreenshot(data)
+  })
+
+  // QA Pre-flight dialog listeners
+  window.api.onQaPreflightShow(() => {
+    state.qaPreflightVisible = true
+    showDialog('dialog-qa-preflight')
+  })
+
+  window.api.onQaInstructionsShow(() => {
+    document.getElementById('qa-instructions-suppress').checked = false
+    showDialog('dialog-qa-instructions')
+  })
+
+  window.api.onQaRoutingConfirmShow(() => {
+    showDialog('dialog-qa-routing-confirm')
+  })
 }
 
 // ─── Event Listeners ────────────────────────────────────────────────────────
@@ -183,6 +211,54 @@ function wireEventListeners() {
   // Add Agent dialog cancel button
   document.getElementById('btn-add-agent-cancel').addEventListener('click', () => {
     hideDialog('dialog-add-agent')
+  })
+
+  // QA note capture modal (Shift+S)
+  document.getElementById('btn-qa-note-submit').addEventListener('click', qaSubmitNote)
+  document.getElementById('btn-qa-note-cancel').addEventListener('click', qaCancelNote)
+  document.getElementById('qa-note-textarea').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); qaSubmitNote() }
+    if (e.key === 'Escape') { e.preventDefault(); qaCancelNote() }
+  })
+
+  // QA Pre-flight dialog buttons
+  document.getElementById('btn-qa-preflight-ready').addEventListener('click', () => {
+    state.qaPreflightVisible = false
+    hideDialog('dialog-qa-preflight')
+    window.api.qaPreflightReady()
+  })
+
+  document.getElementById('btn-qa-preflight-cancel').addEventListener('click', () => {
+    hideDialog('dialog-qa-preflight')
+    showDialog('dialog-qa-preflight-confirm-abort')
+  })
+
+  document.getElementById('btn-qa-preflight-abort-yes').addEventListener('click', () => {
+    state.qaPreflightVisible = false
+    hideDialog('dialog-qa-preflight-confirm-abort')
+    window.api.qaPreflightAbort()
+  })
+
+  document.getElementById('btn-qa-preflight-abort-no').addEventListener('click', () => {
+    hideDialog('dialog-qa-preflight-confirm-abort')
+    showDialog('dialog-qa-preflight')
+  })
+
+  document.getElementById('btn-qa-instructions-ok').addEventListener('click', () => {
+    const suppress = document.getElementById('qa-instructions-suppress').checked
+    hideDialog('dialog-qa-instructions')
+    window.api.qaInstructionsConfirm(suppress)
+  })
+
+  // QA Routing Confirmation dialog
+  document.getElementById('btn-qa-routing-confirm-yes').addEventListener('click', () => {
+    hideDialog('dialog-qa-routing-confirm')
+    window.api.qaRoutingConfirmYes()
+  })
+
+  document.getElementById('btn-qa-routing-confirm-no').addEventListener('click', () => {
+    hideDialog('dialog-qa-routing-confirm')
+    window.api.qaRoutingConfirmNo()
   })
 
   // Create Agent button (sidebar)
@@ -1082,12 +1158,13 @@ function cancelSelectionMode() {
 
 function handlePipelineStatus(data) {
   // Only update pipeline state for actual pipeline states, not transient events
-  const validPipelineStates = ['idle', 'running', 'paused', 'complete', 'error', 'aborted']
+  const validPipelineStates = ['idle', 'running', 'paused', 'complete', 'error', 'aborted', 'waiting-for-user']
   if (validPipelineStates.includes(data.state)) {
     state.pipelineState = data.state
   }
   state.pipelineSteps = data.steps || []
   state.currentStepIndex = data.currentStepIndex
+  state.activeAgentIsQa = data.isQaAgent === true
 
   // Handle review-loop state
   if (data.state === 'review-loop' && data.loopType) {
@@ -1939,16 +2016,24 @@ function renderPipelineCanvas() {
           pipsContainer.className = 'connector-pips-container'
           pipsContainer.dataset.agentId = nextStep.agent_id
           pipsContainer.dataset.maxLoops = maxLoops
-          
+
           // Render pips
+          // If reviewer step is complete, all pips up to currentLoop are done (no active)
+          // If reviewer step is running, the currentLoop pip is active
+          const isReviewerComplete = reviewerStatus === 'complete'
           for (let i = 1; i <= maxLoops; i++) {
             const pip = document.createElement('div')
             pip.className = 'connector-pip'
-            if (i < currentLoop) pip.classList.add('done')
-            else if (i === currentLoop) pip.classList.add('active')
+            if (i <= currentLoop && isReviewerComplete) {
+              pip.classList.add('done')
+            } else if (i < currentLoop) {
+              pip.classList.add('done')
+            } else if (i === currentLoop && !isReviewerComplete) {
+              pip.classList.add('active')
+            }
             pipsContainer.appendChild(pip)
           }
-          
+
           connector.appendChild(pipsContainer)
         }
       } else {
@@ -2066,6 +2151,8 @@ function getSelectedAgent() {
  */
 function updateLoopConfigUI(agent) {
   const loopTypeSelect = document.getElementById('detail-reviewer-status')
+  if (!loopTypeSelect) return
+  
   const maxLoopsLabel = document.getElementById('detail-max-loops-label')
   const maxLoopsVal = document.getElementById('detail-max-loops-val')
   const maxLoopsInput = document.getElementById('detail-max-loops-input')
@@ -2107,6 +2194,7 @@ function updateLoopConfigUI(agent) {
  */
 function updateRoleUI(agent) {
   const roleSelect = document.getElementById('detail-agent-role')
+  if (!roleSelect) return
   // Set dropdown value: empty string for null/undefined role
   roleSelect.value = agent.role || ''
 }
@@ -2273,6 +2361,7 @@ function updateAgentControls() {
   const killBtn = document.getElementById('btn-kill-agent')
   const viewOutputBtn = document.getElementById('btn-view-output')
   const roleSelect = document.getElementById('detail-agent-role')
+  const agentControls = document.getElementById('agent-controls')
 
   // Continue only when paused at transition
   if (continueBtn) {
@@ -2298,6 +2387,60 @@ function updateAgentControls() {
     const isRunning = state.pipelineState === 'running'
     const isError = state.pipelineState === 'error'
     roleSelect.disabled = isRunning || isError
+  }
+
+  // QA action buttons (All Good — Complete, Done — Write Report)
+  const qaContainer = document.getElementById('qa-action-buttons')
+  if (qaContainer && state.pipelineState === 'waiting-for-user' && state.activeAgentIsQa) {
+    qaContainer.style.display = 'flex'
+
+    // "All Good — Complete" button
+    if (!document.getElementById('btn-qa-all-good')) {
+      const allGoodBtn = document.createElement('button')
+      allGoodBtn.id = 'btn-qa-all-good'
+      allGoodBtn.className = 'agent-btn'
+      allGoodBtn.textContent = 'All Good — Complete'
+      allGoodBtn.addEventListener('click', async () => {
+        allGoodBtn.disabled = true
+        allGoodBtn.textContent = 'Completing…'
+        try {
+          await window.api.qaUserAllGood()
+          appendLogLine('QA session marked as passing — completing pipeline.', 'info')
+        } catch (e) {
+          appendLogLine('Failed to signal QA all good: ' + e.message, 'error')
+          allGoodBtn.disabled = false
+          allGoodBtn.textContent = 'All Good — Complete'
+        }
+      })
+      qaContainer.appendChild(allGoodBtn)
+    }
+
+    // "Done — Write Report" button
+    if (!document.getElementById('btn-qa-done')) {
+      const doneBtn = document.createElement('button')
+      doneBtn.id = 'btn-qa-done'
+      doneBtn.className = 'agent-btn primary'
+      doneBtn.textContent = 'Done — Write Report'
+      doneBtn.addEventListener('click', async () => {
+        doneBtn.disabled = true
+        doneBtn.textContent = 'Finishing…'
+        try {
+          await window.api.qaUserDone()
+          appendLogLine('QA session complete — agent is writing the report.', 'info')
+        } catch (e) {
+          appendLogLine('Failed to signal QA done: ' + e.message, 'error')
+          doneBtn.disabled = false
+          doneBtn.textContent = 'Done — Write Report'
+        }
+      })
+      qaContainer.appendChild(doneBtn)
+    }
+  } else if (qaContainer) {
+    qaContainer.style.display = 'none'
+    const allGoodBtn = document.getElementById('btn-qa-all-good')
+    if (allGoodBtn) allGoodBtn.remove()
+    const doneBtn = document.getElementById('btn-qa-done')
+    if (doneBtn) doneBtn.remove()
   }
 }
 
@@ -3752,17 +3895,17 @@ function updateOAuthFields(prefix) {
   const apiKeyInput = document.getElementById(`${prefix}-api-key`)
   const baseUrlInput = document.getElementById(`${prefix}-base-url`)
   const modelNameInput = document.getElementById(`${prefix}-model-name`)
-  const testButton = document.getElementById(`${prefix}-auth-test`)
-  
+  const testButton = document.getElementById(`btn-${prefix}-auth-test`)
+
   if (!oauthCheckbox) return
-  
+
   const isOAuthEnabled = oauthCheckbox.checked
-  
+
   // Show/hide message
   if (oauthMessage) {
     oauthMessage.style.display = isOAuthEnabled ? 'block' : 'none'
   }
-  
+
   // Disable/enable fields
   if (providerSelect) providerSelect.disabled = isOAuthEnabled
   if (apiKeyInput) apiKeyInput.disabled = isOAuthEnabled
@@ -4148,6 +4291,40 @@ async function handleSettingsSave() {
   } catch (e) {
     appendLogLine('Failed to configure auth: ' + e.message, 'error')
   }
+}
+
+// ─── QA MCP Handlers ────────────────────────────────────────────────────────
+
+function handleQaRequestNote() {
+  // Clear textarea and show modal
+  document.getElementById('qa-note-textarea').value = ''
+  showDialog('qa-note-overlay')
+  document.getElementById('qa-note-textarea').focus()
+}
+
+async function qaSubmitNote() {
+  const note = document.getElementById('qa-note-textarea').value.trim()
+  hideDialog('qa-note-overlay')
+  window.api.qaHotkeyReregister()
+  try {
+    await window.api.qaSubmitNote(note)
+    // handleQaScreenshot will log the capture via qa:screenshot-taken IPC
+  } catch (e) {
+    appendLogLine('Screenshot failed: ' + e.message, 'error')
+  }
+}
+
+function qaCancelNote() {
+  hideDialog('qa-note-overlay')
+  window.api.qaHotkeyReregister()
+}
+
+function handleQaScreenshot(data) {
+  const noteText = data.note ? `"${data.note}"` : '(no note)'
+  const flagText = data.flagged ? 'Flagged' : 'Screenshot'
+  appendLogLine(`${flagText}: ${noteText}`, 'info')
+  // Re-register hotkey after capture is complete
+  window.api.qaHotkeyReregister()
 }
 
 async function startPipeline(resumeFrom = null) {

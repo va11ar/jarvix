@@ -102,6 +102,27 @@ contextBridge.exposeInMainWorld('api', {
   discoveryUserSandbox: () => ipcRenderer.send('discovery:user-sandbox'),
   discoveryUserAbort: () => ipcRenderer.send('discovery:user-abort'),
 
+  // QA MCP
+  qaUserDone:         ()     => ipcRenderer.invoke('qa:user-done'),
+  qaUserAllGood:      ()     => ipcRenderer.invoke('qa:user-all-good'),
+  qaHotkeyReregister: ()     => ipcRenderer.send('qa:hotkey-reregister'),
+  onQaRequestNote:    (cb)   => ipcRenderer.on('qa:request-note', () => cb()),
+  onQaScreenshot:     (cb)   => ipcRenderer.on('qa:screenshot-taken', (_, data) => cb(data)),
+
+  // QA Note capture modal
+  qaSubmitNote:       (note) => ipcRenderer.invoke('qa:submit-note', { note }),
+  qaCancelNote:       ()     => ipcRenderer.send('qa:cancel-note'),
+
+  // QA Pre-flight dialogs
+  onQaPreflightShow:      (cb) => ipcRenderer.on('qa:preflight-show',      () => cb()),
+  onQaInstructionsShow:   (cb) => ipcRenderer.on('qa:instructions-show',   () => cb()),
+  qaPreflightReady:       ()   => ipcRenderer.send('qa:preflight-ready'),
+  qaPreflightAbort:       ()   => ipcRenderer.send('qa:preflight-abort'),
+  qaInstructionsConfirm:  (suppress) => ipcRenderer.send('qa:instructions-confirm', { suppress }),
+  qaRoutingConfirmYes:    ()   => ipcRenderer.send('qa:routing-confirm-yes'),
+  qaRoutingConfirmNo:     ()   => ipcRenderer.send('qa:routing-confirm-no'),
+  onQaRoutingConfirmShow: (cb) => ipcRenderer.on('qa:routing-confirm-show', () => cb()),
+
   // Cleanup
   removeAllListeners: (channel) => ipcRenderer.removeAllListeners(channel),
 })

@@ -142,12 +142,12 @@ html, body {
   align-items: center;
   gap: 2px;
   padding: 0 8px;
-  border-left: 1px solid var(--border);
   height: 100%;
   flex-shrink: 0;
   -webkit-app-region: no-drag;
-  margin-left: auto;
-  margin-right: auto;
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
 }
 
 .tb-btn {
@@ -1091,6 +1091,11 @@ html, body {
   justify-content: center;
 }
 
+/* Overlay that appears on top of another dialog (e.g., OAuth warning) */
+.overlay.overlay-top {
+  z-index: 200;
+}
+
 .dialog {
   position: relative;
   z-index: 100;
@@ -1104,6 +1109,14 @@ html, body {
   font-family: var(--mono);
   font-size: 12px;
   box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+}
+
+/* Nested dialog (shown on top of another dialog) */
+.overlay .overlay {
+  z-index: 150;
+}
+.overlay .overlay .dialog {
+  z-index: 200;
 }
 
 .welcome-dialog {
@@ -1192,13 +1205,29 @@ html, body {
 .dialog-input:focus { border-color: var(--accent); }
 .dialog-input::placeholder { color: var(--text-faint); }
 .dialog-input[readonly] { color: var(--text-dim); cursor: default; }
-.dialog-input:disabled { 
-  background: var(--bg2); 
-  color: var(--text-dim); 
+.dialog-input:disabled {
+  background: var(--bg2);
+  color: var(--text-dim);
   border-color: var(--border);
   cursor: not-allowed;
   opacity: 0.6;
 }
+.dialog-textarea {
+  width: 100%;
+  background: var(--bg3);
+  border: 1px solid var(--border2);
+  border-radius: 2px;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 8px;
+  outline: none;
+  transition: border-color 0.15s;
+  resize: vertical;
+  min-height: 80px;
+}
+.dialog-textarea:focus { border-color: var(--accent); }
+.dialog-textarea::placeholder { color: var(--text-faint); }
 select:disabled {
   background: var(--bg2); 
   color: var(--text-dim); 
@@ -1983,4 +2012,25 @@ select:disabled {
   background: var(--bg1);
   border-top: 1px solid var(--border);
   gap: 8px;
+}
+
+/* QA Action Buttons - displayed in pipeline progress section during QA waiting state */
+#qa-action-buttons {
+  display: none;  /* Hidden by default, shown by JavaScript when QA agent is waiting */
+  flex-direction: row;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 8px;
+  background: var(--bg1);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+}
+
+#qa-action-buttons .agent-btn {
+  display: inline-block;
+  width: auto;
+  margin-bottom: 0;
+  padding: 6px 12px;
+  font-size: 11px;
+  text-align: center;
 }

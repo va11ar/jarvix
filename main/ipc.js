@@ -205,6 +205,60 @@ function registerIpcHandlers(win) {
     }
     return shell.openExternal(url)
   }))
+
+  // ── QA MCP ───────────────────────────────────────────────────────────────
+  // Re-register the Shift+S hotkey after the note overlay closes.
+  ipcMain.on(CONSTANTS.IPC.QA_HOTKEY_REREGISTER, () => {
+    const PipelineRunner = require('./pipeline/PipelineRunner')
+    const { registerQaHotkey } = require('./qaHotkey')
+    if (PipelineRunner.currentAgent && PipelineRunner.currentAgent.qaMcpRunner) {
+      registerQaHotkey(win)
+    }
+  })
+
+  // User clicked "Done — Write Report" (called from pipeline button).
+  ipcMain.handle(CONSTANTS.IPC.QA_USER_DONE, h(async () => {
+    const PipelineRunner = require('./pipeline/PipelineRunner')
+    const agent = PipelineRunner.currentAgent
+    if (!agent || !agent.qaMcpRunner) return { error: 'No active QA session' }
+    agent.qaMcpRunner.signalUserDone()
+    return { ok: true }
+  }))
+
+  // User clicked "All Good — Complete" (called from pipeline button).
+  ipcMain.handle(CONSTANTS.IPC.QA_USER_ALL_GOOD, h(async () => {
+    const PipelineRunner = require('./pipeline/PipelineRunner')
+    const agent = PipelineRunner.currentAgent
+    if (!agent || !agent.qaMcpRunner) return { error: 'No active QA session' }
+    agent.qaMcpRunner.signalAllGood()
+    return { ok: true }
+  }))
+
+  // User submitted note via Shift+S modal — captures screenshot with note atomically
+  ipcMain.handle(CONSTANTS.IPC.QA_SUBMIT_NOTE, h(async ({ note }) => {
+    const PipelineRunner = require('./pipeline/PipelineRunner')
+    const agent = PipelineRunner.currentAgent
+    if (!agent || !agent.qaMcpRunner) return { error: 'No active QA session' }
+    agent.qaMcpRunner.captureWithNote(note || '')
+    return { ok: true }
+  }))
+
+  // User cancelled note modal — just re-register hotkey
+  ipcMain.on(CONSTANTS.IPC.QA_CANCEL_NOTE, () => {
+    // Hotkey re-registered by renderer via qaHotkeyReregister
+  })
+
+  // QA Pre-flight dialog handlers
+  ipcMain.on(CONSTANTS.IPC.QA_PREFLIGHT_READY, () => {})
+
+  ipcMain.on(CONSTANTS.IPC.QA_PREFLIGHT_ABORT, () => {})
+
+  ipcMain.on(CONSTANTS.IPC.QA_INSTRUCTIONS_CONFIRM, (_, data) => {
+    if (data && data.suppress && PipelineRunner.currentProjectPath) {
+      ProjectManager.setQaInstructionsSeen(PipelineRunner.currentProjectPath)
+        .catch(err => console.error('[ipc] Failed to set qaInstructionsSeen:', err.message))
+    }
+  })
 }
 
 module.exports = { registerIpcHandlers }

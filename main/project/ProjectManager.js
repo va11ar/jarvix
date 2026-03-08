@@ -216,4 +216,22 @@ async function addApprovedCommands(projectPath, commands) {
   }
 }
 
-module.exports = { create, open, validate, listAll, updatePipeline, addApprovedCommands }
+/**
+ * Suppress the QA instructions dialog for this project on future runs.
+ * Called when the user checks "Do not show this again" in the instructions dialog.
+ * @param {string} projectPath
+ * @returns {Promise<{ok: boolean, error?: string}>}
+ */
+async function setQaInstructionsSeen(projectPath) {
+  try {
+    const filePath = path.join(projectPath, 'project.json')
+    const projectJson = JSON.parse(await fs.readFile(filePath, 'utf8'))
+    projectJson.qaInstructionsSeen = true
+    await fs.writeFile(filePath, JSON.stringify(projectJson, null, 2), 'utf8')
+    return { ok: true }
+  } catch (e) {
+    return { error: e.message }
+  }
+}
+
+module.exports = { create, open, validate, listAll, updatePipeline, addApprovedCommands, setQaInstructionsSeen }

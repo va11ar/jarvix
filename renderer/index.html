@@ -118,6 +118,7 @@
             <div class="progress-fill" id="progress-fill" style="width: 0%"></div>
           </div>
           <div class="progress-text" id="progress-text">Step 0 of 0</div>
+          <div id="qa-action-buttons" style="display:none;"></div>
         </div>
         <div id="canvas-inner">
           <div id="pipeline-canvas"></div>
@@ -140,6 +141,7 @@
               <option value="">Regular</option>
               <option value="producer">Producer</option>
               <option value="producer-reviewer">Producer Reviewer</option>
+              <option value="qa">QA</option>
             </select>
           </div>
           <div class="reviewer-status-section">
@@ -416,7 +418,7 @@
   </div>
 
   <!-- OAuth Warning Dialog -->
-  <div class="overlay hidden" id="dialog-oauth-warning">
+  <div class="overlay overlay-top hidden" id="dialog-oauth-warning">
     <div class="dialog" style="width:480px;">
       <div class="dialog-header">
         <div class="dialog-title">OAuth Authentication Notice</div>
@@ -468,12 +470,12 @@
           <input class="dialog-input" id="auth-model-name" type="text" placeholder="gpt-4, qwen3-coder-plus, etc." style="width:100%;box-sizing:border-box;">
         </div>
 
-        <div class="dialog-row" style="margin-bottom:16px;">
-          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+        <div style="margin-bottom:16px;">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-bottom:8px;">
             <input type="checkbox" id="auth-oauth-checkbox" style="width:16px;height:16px;">
             <span style="font-size:10px;color:var(--text);">Use Qwen's OAuth</span>
           </label>
-          <p id="auth-oauth-message" style="color:var(--text-faint);font-size:9px;margin-top:8px;display:none;line-height:1.5;">
+          <p id="auth-oauth-message" style="color:var(--text-faint);font-size:9px;display:none;line-height:1.5;">
             OAuth requires Qwen CLI to be pre-authenticated. Please launch Qwen at least once before starting the pipeline to complete authentication. If not pre-authenticated, the agent may hang.
           </p>
         </div>
@@ -608,6 +610,121 @@
     </div>
   </div>
 
+  <!-- QA Pre-flight Dialog -->
+  <div class="overlay hidden" id="dialog-qa-preflight">
+    <div class="dialog" style="width:480px;">
+      <div class="dialog-header">
+        <div class="dialog-title">Testing Required</div>
+      </div>
+      <div class="dialog-body" style="padding:16px;">
+        <p style="color:var(--text);margin-bottom:12px;font-size:12px;">
+          The next agent is detected to be a QA agent. This agent will require you to test the app.
+        </p>
+        <p style="color:var(--text-dim);margin-bottom:0;font-size:11px;line-height:1.6;">
+          To do this you need to launch your artifact from the <strong>Output</strong> folder
+          inside the project. Once done, come back here and press <strong>Ready</strong>.
+        </p>
+      </div>
+      <div class="dialog-footer">
+        <button class="footer-btn" id="btn-qa-preflight-cancel">Cancel</button>
+        <button class="footer-btn primary" id="btn-qa-preflight-ready">Ready</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- QA Pre-flight Cancel Confirmation Dialog -->
+  <div class="overlay hidden" id="dialog-qa-preflight-confirm-abort">
+    <div class="dialog" style="width:440px;">
+      <div class="dialog-header">
+        <div class="dialog-title">Abort Pipeline?</div>
+      </div>
+      <div class="dialog-body" style="padding:16px;">
+        <p style="color:var(--text-dim);font-size:11px;line-height:1.6;">
+          Without the artifact running, the QA agent cannot do its job.
+          If you cancel now the pipeline will be aborted. Are you sure?
+        </p>
+      </div>
+      <div class="dialog-footer">
+        <button class="footer-btn" id="btn-qa-preflight-abort-no">No</button>
+        <button class="footer-btn" id="btn-qa-preflight-abort-yes">Yes, Abort</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- QA Instructions Dialog -->
+  <div class="overlay hidden" id="dialog-qa-instructions">
+    <div class="dialog" style="width:520px;">
+      <div class="dialog-header">
+        <div class="dialog-title">How to Test Your App</div>
+      </div>
+      <div class="dialog-body" style="padding:16px;">
+        <p style="color:var(--text);margin-bottom:12px;font-size:12px;line-height:1.6;">
+          Test your app by using it normally. While doing so, you can take screenshots
+          using <strong>Shift + S</strong>. This will capture your whole screen.
+        </p>
+        <div style="background:var(--yellow-dim);border:1px solid var(--yellow);
+                    border-radius:4px;padding:10px 12px;margin-bottom:12px;">
+          <p style="color:var(--yellow);font-size:11px;margin:0;line-height:1.5;">
+            ⚠ Beware of any personal or secret information appearing on screen when
+            taking a screenshot. The screenshot captures everything visible on your display.
+          </p>
+        </div>
+        <p style="color:var(--text-dim);margin-bottom:12px;font-size:11px;line-height:1.6;">
+          After pressing Shift + S, a text field will appear here in Jarvix. Write a comment
+          describing the issue you just captured, then press <strong>OK</strong> to save the
+          screenshot and comment together. You can then take another screenshot.
+        </p>
+        <p style="color:var(--text-dim);margin-bottom:16px;font-size:11px;line-height:1.6;">
+          When you are finished testing, press <strong>Done — Write Report</strong>.
+        </p>
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+          <input type="checkbox" id="qa-instructions-suppress">
+          <span style="color:var(--text-faint);font-size:10px;">
+            Do not show this message again for this project
+          </span>
+        </label>
+      </div>
+      <div class="dialog-footer">
+        <button class="footer-btn primary" id="btn-qa-instructions-ok">OK</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- QA Note Capture Modal (Shift+S) -->
+  <div class="overlay hidden" id="qa-note-overlay">
+    <div class="dialog" style="width:520px;">
+      <div class="dialog-header">
+        <div class="dialog-title">Flag this moment</div>
+        <div class="dialog-hint">Describe what you are flagging. Press Enter to capture, Escape to cancel.</div>
+      </div>
+      <div class="dialog-body" style="padding:16px;">
+        <textarea id="qa-note-textarea" class="dialog-textarea" rows="4" placeholder="e.g. Submit button does not respond when clicked..."></textarea>
+      </div>
+      <div class="dialog-footer">
+        <button class="footer-btn" id="btn-qa-note-cancel">Cancel</button>
+        <button class="footer-btn primary" id="btn-qa-note-submit">Capture</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- QA Routing Confirmation Dialog -->
+  <div class="overlay overlay-top hidden" id="dialog-qa-routing-confirm">
+    <div class="dialog" style="width:520px;">
+      <div class="dialog-header">
+        <div class="dialog-title">QA Found Issues</div>
+      </div>
+      <div class="dialog-body" style="padding:16px;">
+        <p style="color:var(--text-dim);line-height:1.6;">
+          The QA agent found issues in the artifacts and is suggesting sending the report back to the producer agent to fix them. Do you want to proceed?
+        </p>
+      </div>
+      <div class="dialog-footer">
+        <button class="footer-btn" id="btn-qa-routing-confirm-no">No</button>
+        <button class="footer-btn primary" id="btn-qa-routing-confirm-yes">Yes</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Agent Context Menu -->
   <div class="context-menu hidden" id="agent-context-menu">
     <div class="context-menu-item" data-action="assign-review-target">Assign review target</div>
@@ -669,12 +786,12 @@
                 <input class="dialog-input" id="settings-auth-model-name" type="text" placeholder="gpt-4, qwen3-coder-plus, etc." style="width:100%;box-sizing:border-box;">
               </div>
 
-              <div class="dialog-row" style="margin-bottom:16px;">
-                <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+              <div style="margin-bottom:16px;">
+                <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-bottom:8px;">
                   <input type="checkbox" id="settings-auth-oauth-checkbox" style="width:16px;height:16px;">
                   <span style="font-size:10px;color:var(--text);">Use Qwen's OAuth</span>
                 </label>
-                <p id="settings-auth-oauth-message" style="color:var(--text-faint);font-size:9px;margin-top:8px;display:none;line-height:1.5;">
+                <p id="settings-auth-oauth-message" style="color:var(--text-faint);font-size:9px;display:none;line-height:1.5;">
                   OAuth requires Qwen CLI to be pre-authenticated. Please launch Qwen at least once before starting the pipeline to complete authentication. If not pre-authenticated, the agent may hang.
                 </p>
               </div>
