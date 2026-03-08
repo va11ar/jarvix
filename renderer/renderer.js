@@ -18,6 +18,7 @@ const state = {
   // Pipeline state
   pipelineSteps: [],
   currentStepIndex: -1,
+  maxStepReached: -1,
   selectedAgentId: null,
   selectedNodeIndex: -1,
   selectedLibraryAgentId: null, // Track library agent selection separately
@@ -1166,6 +1167,11 @@ function handlePipelineStatus(data) {
   state.currentStepIndex = data.currentStepIndex
   state.activeAgentIsQa = data.isQaAgent === true
 
+  // Track the maximum step reached (for progress bar that only increases)
+  if (data.currentStepIndex > state.maxStepReached) {
+    state.maxStepReached = data.currentStepIndex
+  }
+
   // Handle review-loop state
   if (data.state === 'review-loop' && data.loopType) {
     state.revisionLoopCounts[data.agentId] = data.loopCount
@@ -1197,6 +1203,7 @@ function handlePipelineStatus(data) {
 
   updateTitlebarStatus()
   updateStatusBar()
+  updatePipelineProgress()
   renderPipelineAgents()
   renderPipelineCanvas()
   updateDetailPanel()
@@ -1724,6 +1731,31 @@ function updateStatusBar() {
   }
 
   if (agentCountEl) agentCountEl.textContent = state.agents.length
+}
+
+function updatePipelineProgress() {
+  const progressFill = document.getElementById('progress-fill')
+  const progressText = document.getElementById('progress-text')
+  const total = state.pipelineSteps.length
+
+  if (progressText) {
+    if (total > 0 && state.maxStepReached >= 0) {
+      progressText.textContent = `Step ${state.maxStepReached + 1} of ${total}`
+    } else if (total > 0) {
+      progressText.textContent = `Step 0 of ${total}`
+    } else {
+      progressText.textContent = '—'
+    }
+  }
+
+  if (progressFill) {
+    if (total > 0 && state.maxStepReached >= 0) {
+      const percent = ((state.maxStepReached + 1) / total) * 100
+      progressFill.style.width = `${percent}%`
+    } else {
+      progressFill.style.width = '0%'
+    }
+  }
 }
 
 // ─── Pipeline Rendering ─────────────────────────────────────────────────────
@@ -2838,6 +2870,7 @@ async function loadProject(projectPath) {
     })
 
     state.currentStepIndex = -1
+    state.maxStepReached = -1
     state.pipelineState = 'idle'
     state.selectedNodeIndex = -1
     state.selectedAgentId = null
