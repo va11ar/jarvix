@@ -253,7 +253,15 @@ tracking purposes — do not review this file as an artifact.`
             if (match) {
               this.status = match[0].trim()
             } else {
-              await ActivityLog.append(this.projectPath, `Agent output file exists but missing PIPELINE_STATUS line`, 'warn')
+              // File exists but no status — check stdout as fallback
+              const stdoutContent = stdoutLines.join('\n')
+              const stdoutMatch = PIPELINE_STATUS_REGEX.exec(stdoutContent)
+              if (stdoutMatch) {
+                this.status = stdoutMatch[0].trim()
+                await ActivityLog.append(this.projectPath, `PIPELINE_STATUS detected in stdout (output file missing status)`, 'warn')
+              } else {
+                await ActivityLog.append(this.projectPath, `Agent output file exists but missing PIPELINE_STATUS line`, 'warn')
+              }
             }
           } catch (readErr) {
             // File not found or unreadable — check stdout for PIPELINE_STATUS

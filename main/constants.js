@@ -44,6 +44,9 @@ const IPC = {
   AGENTS_GET: 'agents:get',
   AGENTS_CREATE: 'agents:create',
   AGENTS_USAGE_COUNT: 'agents:usageCount',
+  AGENTS_UPDATE_REVIEW_TARGET:   'agents:update-review-target',
+  AGENTS_UPDATE_LOOP_CONFIG:     'agents:update-loop-config',
+  AGENTS_UPDATE_ROLE:            'agents:update-role',
 
   // Pipeline
   PIPELINE_START: 'pipeline:start',
@@ -69,6 +72,8 @@ const IPC = {
   CONTEXT_WRITE: 'context:write',
   CONTEXT_AGENT_OUTPUT_PATH: 'context:agent-output-path',
   CONTEXT_OPEN_OUTPUT: 'context:open-output',
+  CONTEXT_OPEN_AGENT_FILE:       'context:open-agent-file',
+  CONTEXT_OPEN_BRIEF:            'context:open-brief',
 
   // Settings
   SETTINGS_GET: 'settings:get',
@@ -80,6 +85,13 @@ const IPC = {
   AUTH_TEST: 'auth:test',
   AUTH_GET_SETTINGS: 'auth:get-settings',
   AUTH_OAUTH_ENABLED: 'auth:oauth-enabled',
+  AUTH_SET_OAUTH_ENABLED:        'auth:set-oauth-enabled',
+  AUTH_RESTORE_OAUTH_DEFAULTS:   'auth:restore-oauth-defaults',
+
+  // First Launch
+  FIRST_LAUNCH_CHECK:            'first-launch:check',
+  FIRST_LAUNCH_MARK_DONE:        'first-launch:mark-done',
+  FIRST_LAUNCH_CREATE_BOILERPLATE: 'first-launch:create-boilerplate',
 
   // Qwen installation
   QWEN_CHECK_INSTALLED: 'qwen:check-installed',
@@ -107,6 +119,8 @@ const IPC = {
 
   // Discovery pre-flight
   DISCOVERY_STARTED: 'discovery:started',
+  DISCOVERY_SHOW_CHOICE: 'discovery:show-choice',
+  DISCOVERY_SHOW_CHOICE_ACK: 'discovery:show-choice-ack',
   DISCOVERY_COMPLETE: 'discovery:complete',
   DISCOVERY_ERROR: 'discovery:error',
   DISCOVERY_USER_APPROVE: 'discovery:user-approve',

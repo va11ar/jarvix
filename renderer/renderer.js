@@ -119,9 +119,19 @@ function setupIPCListeners() {
     handleWindowFocus()
   })
 
+  window.api.onStartupAuthInvalid(() => {
+    // Auth is invalid at startup — surface this to the user.
+    appendLogLine('Qwen authentication is not configured. Please configure auth before starting a pipeline.', 'error')
+    showDialog('dialog-auth-warning')
+  })
+
   // Discovery pre-flight listeners
   window.api.onDiscoveryStarted(() => {
     handleDiscoveryStarted()
+  })
+
+  window.api.onDiscoveryShowChoice(() => {
+    handleDiscoveryShowChoice()
   })
 
   window.api.onDiscoveryComplete((data) => {
@@ -1220,6 +1230,14 @@ function handleDiscoveryStarted() {
   showOverlay('overlay-discovery')
 }
 
+function handleDiscoveryShowChoice() {
+  hideOverlay('overlay-discovery')
+  state.preflightPhase = 'choice'
+  state.preflightDockerError = false
+  renderPreflightModal()
+  showDialog('dialog-preflight')
+}
+
 function handleDiscoveryComplete(data) {
   hideOverlay('overlay-discovery')
   state.preflightDelta = data.delta || []
@@ -1354,9 +1372,7 @@ function renderPreflightSandboxWarning(body, footer, title) {
     backBtn.className = 'footer-btn primary'
     backBtn.textContent = 'Choose Differently'
     backBtn.addEventListener('click', () => {
-      state.preflightPhase = 'choice'
-      state.preflightDockerError = false
-      renderPreflightModal()
+      window.api.discoveryShowChoiceAck()
     })
 
     footer.appendChild(retryBtn)

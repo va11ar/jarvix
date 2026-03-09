@@ -927,6 +927,28 @@ class PipelineRunner {
    * Per §5 (States A through F) and §6
    * @param {Object} programmerAgent - The programmer agent snapshot
    * @returns {Promise<{aborted?: boolean, error?: string, sandbox?: boolean}>}
+   *
+   * DEADLOCK TRACE (fixed):
+   * ─────────────────────────────────────────────────────────────────────────────
+   * 1. Main sends DISCOVERY_SHOW_CHOICE → renderer shows choice modal.
+   *    Main waits on Promise with listeners: user-approve, user-sandbox, user-abort.
+   *
+   * 2. User clicks "Use Sandbox Mode" → renderer sends discovery:user-sandbox.
+   *    Main's onSandbox fires, runs _checkDocker(), finds Docker unavailable.
+   *
+   * 3. Main sends DISCOVERY_ERROR { dockerRequired: true }.
+   *    Main enters NEW Promise with listeners: user-sandbox (retry), show-choice-ack,
+   *    user-abort (abort from docker).
+   *
+   * 4. Renderer's handleDiscoveryError sets preflightPhase = 'sandbox-warning'.
+   *
+   * 5. User clicks "Choose Differently" → renderer sends discovery:show-choice-ack.
+   *    Main's onChooseDifferently fires, cleans up Docker-error listeners,
+   *    sends DISCOVERY_SHOW_CHOICE, re-registers original choice listeners.
+   *
+   * 6. Renderer receives DISCOVERY_SHOW_CHOICE → handleDiscoveryShowChoice()
+   *    resets state and re-renders choice modal. Pipeline can continue.
+   * ─────────────────────────────────────────────────────────────────────────────
    */
   async _runPreflight(programmerAgent) {
     const projectPath = this.currentProjectPath
@@ -936,7 +958,7 @@ class PipelineRunner {
 
     try {
       // State B — Show choice modal FIRST (before discovery runs)
-      win.webContents.send(IPC.DISCOVERY_COMPLETE, { delta: [] })
+      win.webContents.send(IPC.DISCOVERY_SHOW_CHOICE)
 
       // Wait for user choice
       const choice = await new Promise((resolve) => {
@@ -986,7 +1008,8 @@ class PipelineRunner {
           return await new Promise((resolve) => {
             const onRetry = async () => {
               ipcMain.removeListener('discovery:user-sandbox', onRetry)
-              ipcMain.removeListener('discovery:user-abort', onChooseDifferently)
+              ipcMain.removeListener('discovery:show-choice-ack', onChooseDifferently)
+              ipcMain.removeListener('discovery:user-abort', onAbortFromDocker)
               const retryDocker = await this._checkDocker()
               if (retryDocker) {
                 this.useSandboxMode = true
@@ -997,20 +1020,25 @@ class PipelineRunner {
                   dockerRequired: true,
                 })
                 ipcMain.once('discovery:user-sandbox', onRetry)
-                ipcMain.once('discovery:user-abort', onChooseDifferently)
+                ipcMain.once('discovery:show-choice-ack', onChooseDifferently)
+                ipcMain.once('discovery:user-abort', onAbortFromDocker)
               }
             }
             const onChooseDifferently = () => {
               ipcMain.removeListener('discovery:user-sandbox', onRetry)
-              ipcMain.removeListener('discovery:user-abort', onChooseDifferently)
+              ipcMain.removeListener('discovery:show-choice-ack', onChooseDifferently)
+              ipcMain.removeListener('discovery:user-abort', onAbortFromDocker)
               // Go back to choice
-              win.webContents.send(IPC.DISCOVERY_COMPLETE, { delta: [] })
-              ipcMain.once('discovery:user-approve', onInfer)
-              ipcMain.once('discovery:user-sandbox', onSandbox)
-              ipcMain.once('discovery:user-abort', onAbort)
+              win.webContents.send(IPC.DISCOVERY_SHOW_CHOICE)
+            }
+            const onAbortFromDocker = () => {
+              ipcMain.removeListener('discovery:user-sandbox', onRetry)
+              ipcMain.removeListener('discovery:show-choice-ack', onChooseDifferently)
+              resolve({ aborted: true })
             }
             ipcMain.once('discovery:user-sandbox', onRetry)
-            ipcMain.once('discovery:user-abort', onChooseDifferently)
+            ipcMain.once('discovery:show-choice-ack', onChooseDifferently)
+            ipcMain.once('discovery:user-abort', onAbortFromDocker)
           })
         }
         this.useSandboxMode = true

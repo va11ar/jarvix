@@ -14,7 +14,6 @@ contextBridge.exposeInMainWorld('api', {
   getAgent: (id) => ipcRenderer.invoke('agents:get', id),
   createAgent: (def) => ipcRenderer.invoke('agents:create', def),
   agentUsageCount: (id) => ipcRenderer.invoke('agents:usageCount', id),
-  openAgentEditor: (agentId) => ipcRenderer.invoke('agents:open-editor', { agentId }),
   updateAgentReviewTarget: (agentId, reviewTargetId) => ipcRenderer.invoke('agents:update-review-target', { agentId, reviewTargetId }),
   updateLoopConfig: (agentId, loopType, maxRevisionLoops) => ipcRenderer.invoke('agents:update-loop-config', { agentId, loopType, maxRevisionLoops }),
   updateAgentRole: (agentId, role) => ipcRenderer.invoke('agents:update-role', { agentId, role }),
@@ -93,14 +92,17 @@ contextBridge.exposeInMainWorld('api', {
   onAgentDefinitionChanged: (cb) => ipcRenderer.on('agent:definition-changed', (_, data) => cb(data)),
   onIncompleteRunDetected: (cb) => ipcRenderer.on('pipeline:incomplete-run-detected', (_, data) => cb(data)),
   onWindowFocus: (cb) => ipcRenderer.on('window:focus', (_, data) => cb(data)),
+  onStartupAuthInvalid: (cb) => ipcRenderer.on('startup:auth-invalid', () => cb()),
 
   // Discovery pre-flight events
   onDiscoveryStarted: (cb) => ipcRenderer.on('discovery:started', (_, data) => cb(data)),
+  onDiscoveryShowChoice: (cb) => ipcRenderer.on('discovery:show-choice', () => cb()),
   onDiscoveryComplete: (cb) => ipcRenderer.on('discovery:complete', (_, data) => cb(data)),
   onDiscoveryError: (cb) => ipcRenderer.on('discovery:error', (_, data) => cb(data)),
   discoveryUserApprove: () => ipcRenderer.send('discovery:user-approve'),
   discoveryUserSandbox: () => ipcRenderer.send('discovery:user-sandbox'),
   discoveryUserAbort: () => ipcRenderer.send('discovery:user-abort'),
+  discoveryShowChoiceAck: () => ipcRenderer.send('discovery:show-choice-ack'),
 
   // QA MCP
   qaUserDone:         ()     => ipcRenderer.invoke('qa:user-done'),

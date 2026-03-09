@@ -1,6 +1,5 @@
 const { ipcMain, dialog, shell } = require('electron')
 const fs = require('fs/promises')
-const fsSync = require('fs')
 const path = require('path')
 const ProjectManager = require('./project/ProjectManager')
 const AgentLibrary = require('./project/AgentLibrary')
@@ -9,18 +8,11 @@ const AgentEditor = require('./editor/AgentEditor')
 const Settings = require('./settings')
 const { validateQwenAuth, configureQwenAuth, testQwenAuth, isOAuthEnabled, setOAuthEnabled, restoreQwenSettingsToOAuthDefaults } = require('./auth')
 const CONSTANTS = require('./constants')
+const ContextManager = require('./context/ContextManager')
 
 // Every handler follows the same pattern: async, try/catch, return { error } on failure.
 const h = (fn) => async (_, ...args) => {
   try { return await fn(...args) } catch (e) { return { error: e.message } }
-}
-
-function assertProjectPath(filePath, projectPath) {
-  const resolved = path.resolve(filePath)
-  const base = path.resolve(projectPath)
-  if (resolved !== base && !resolved.startsWith(base + path.sep)) {
-    throw new Error(`Path outside project directory: ${filePath}`)
-  }
 }
 
 function registerIpcHandlers(win) {
@@ -41,27 +33,26 @@ function registerIpcHandlers(win) {
   }))
 
   // ── Agents ───────────────────────────────────────────────────────────────
-  ipcMain.handle('agents:list',       h(() => AgentLibrary.list()))
-  ipcMain.handle('agents:get',        h((agentId) => AgentLibrary.getById(agentId)))
-  ipcMain.handle('agents:create',     h((definition) => AgentLibrary.create(definition)))
-  ipcMain.handle('agents:usageCount', h((agentId) => AgentLibrary.usageCount(agentId)))
-  ipcMain.handle('agents:open-editor', h(({ agentId }) => AgentEditor.open(agentId, win)))
-  ipcMain.handle('agents:update-review-target', h(({ agentId, reviewTargetId }) => AgentLibrary.updateReviewTarget(agentId, reviewTargetId)))
-  ipcMain.handle('agents:update-loop-config', h(({ agentId, loopType, maxRevisionLoops }) => AgentLibrary.updateLoopConfig(agentId, loopType, maxRevisionLoops)))
-  ipcMain.handle('agents:update-role', h(({ agentId, role }) => AgentLibrary.updateRole(agentId, role)))
+  ipcMain.handle(CONSTANTS.IPC.AGENTS_LIST,       h(() => AgentLibrary.list()))
+  ipcMain.handle(CONSTANTS.IPC.AGENTS_GET,        h((agentId) => AgentLibrary.getById(agentId)))
+  ipcMain.handle(CONSTANTS.IPC.AGENTS_CREATE,     h((definition) => AgentLibrary.create(definition)))
+  ipcMain.handle(CONSTANTS.IPC.AGENTS_USAGE_COUNT, h((agentId) => AgentLibrary.usageCount(agentId)))
+  ipcMain.handle(CONSTANTS.IPC.AGENTS_UPDATE_REVIEW_TARGET, h(({ agentId, reviewTargetId }) => AgentLibrary.updateReviewTarget(agentId, reviewTargetId)))
+  ipcMain.handle(CONSTANTS.IPC.AGENTS_UPDATE_LOOP_CONFIG, h(({ agentId, loopType, maxRevisionLoops }) => AgentLibrary.updateLoopConfig(agentId, loopType, maxRevisionLoops)))
+  ipcMain.handle(CONSTANTS.IPC.AGENTS_UPDATE_ROLE, h(({ agentId, role }) => AgentLibrary.updateRole(agentId, role)))
 
   // ── First Launch ─────────────────────────────────────────────────────────
-  ipcMain.handle('first-launch:check', h(async () => {
+  ipcMain.handle(CONSTANTS.IPC.FIRST_LAUNCH_CHECK, h(async () => {
     const isFirst = await Settings.isFirstLaunch()
     return { isFirst }
   }))
 
-  ipcMain.handle('first-launch:mark-done', h(async () => {
+  ipcMain.handle(CONSTANTS.IPC.FIRST_LAUNCH_MARK_DONE, h(async () => {
     await Settings.markLaunched()
     return { ok: true }
   }))
 
-  ipcMain.handle('first-launch:create-boilerplate', h(async () => {
+  ipcMain.handle(CONSTANTS.IPC.FIRST_LAUNCH_CREATE_BOILERPLATE, h(async () => {
     // Create a minimal boilerplate agent
     const definition = {
       name: 'MyAgent',
@@ -100,50 +91,13 @@ function registerIpcHandlers(win) {
   ipcMain.handle('editor:cancel-changes', h(({ agentId }) => AgentEditor.cancelChanges(agentId)))
 
   // ── Context file I/O ─────────────────────────────────────────────────────
-  ipcMain.handle('context:read', h(({ filePath, projectPath }) => {
-    if (projectPath) assertProjectPath(filePath, projectPath)
-    return fs.readFile(filePath, 'utf8').catch(() => '')
-  }))
-  ipcMain.handle('context:list', h(({ dirPath, projectPath }) => {
-    if (projectPath) assertProjectPath(dirPath, projectPath)
-    return fs.readdir(dirPath).catch(() => [])
-  }))
-  ipcMain.handle('context:write', h(async ({ filePath, content, projectPath }) => {
-    if (projectPath) assertProjectPath(filePath, projectPath)
-    await fs.writeFile(filePath, content, 'utf8')
-    return { ok: true }
-  }))
-  ipcMain.handle('context:agent-output-path', h(({ projectPath, agentFilePath }) => {
-    const outputFileName = path.basename(agentFilePath, '.md') + '.md'
-    return path.join(projectPath, 'Context', outputFileName)
-  }))
-  ipcMain.handle('context:open-output', h(async ({ projectPath, agentFilePath }) => {
-    const outputFileName = path.basename(agentFilePath, '.md') + '.md'
-    const outputPath = path.join(projectPath, 'Context', outputFileName)
-    if (!fsSync.existsSync(outputPath)) {
-      return { exists: false }
-    }
-    await shell.openPath(outputPath)
-    return { exists: true, ok: true }
-  }))
-  ipcMain.handle('context:open-agent-file', h(async ({ projectPath, agentFilePath }) => {
-    // Open the agent's Context/agent.md file (the input file, not output)
-    const agentFileName = path.basename(agentFilePath)
-    const agentContextPath = path.join(projectPath, 'Context', agentFileName)
-    if (!fsSync.existsSync(agentContextPath)) {
-      return { exists: false }
-    }
-    await shell.openPath(agentContextPath)
-    return { exists: true, ok: true }
-  }))
-  ipcMain.handle('context:open-brief', h(async ({ projectPath }) => {
-    const briefPath = path.join(projectPath, 'Context', 'brief.md')
-    if (!fsSync.existsSync(briefPath)) {
-      return { exists: false }
-    }
-    await shell.openPath(briefPath)
-    return { exists: true, ok: true }
-  }))
+  ipcMain.handle(CONSTANTS.IPC.CONTEXT_READ,              h((args) => ContextManager.read(args)))
+  ipcMain.handle(CONSTANTS.IPC.CONTEXT_LIST,              h((args) => ContextManager.list(args)))
+  ipcMain.handle(CONSTANTS.IPC.CONTEXT_WRITE,             h((args) => ContextManager.write(args)))
+  ipcMain.handle(CONSTANTS.IPC.CONTEXT_AGENT_OUTPUT_PATH, h((args) => ContextManager.agentOutputPath(args)))
+  ipcMain.handle(CONSTANTS.IPC.CONTEXT_OPEN_OUTPUT,       h((args) => ContextManager.openOutput(args)))
+  ipcMain.handle(CONSTANTS.IPC.CONTEXT_OPEN_AGENT_FILE,   h((args) => ContextManager.openAgentFile(args)))
+  ipcMain.handle(CONSTANTS.IPC.CONTEXT_OPEN_BRIEF,        h((args) => ContextManager.openBrief(args)))
 
   // ── Settings ─────────────────────────────────────────────────────────────
   ipcMain.handle('settings:get', h(() => Settings.load()))
@@ -160,12 +114,12 @@ function registerIpcHandlers(win) {
     const { getAuthSettings } = require('./auth')
     return await getAuthSettings()
   }))
-  ipcMain.handle('auth:oauth-enabled', h(async () => {
+  ipcMain.handle(CONSTANTS.IPC.AUTH_OAUTH_ENABLED, h(async () => {
     const enabled = await isOAuthEnabled()
     return { enabled }
   }))
-  ipcMain.handle('auth:set-oauth-enabled', h((enabled) => setOAuthEnabled(enabled)))
-  ipcMain.handle('auth:restore-oauth-defaults', h(async () => restoreQwenSettingsToOAuthDefaults()))
+  ipcMain.handle(CONSTANTS.IPC.AUTH_SET_OAUTH_ENABLED, h((enabled) => setOAuthEnabled(enabled)))
+  ipcMain.handle(CONSTANTS.IPC.AUTH_RESTORE_OAUTH_DEFAULTS, h(async () => restoreQwenSettingsToOAuthDefaults()))
 
   // ── Qwen Installation ────────────────────────────────────────────────────
   ipcMain.handle('qwen:check-installed', h(async (customPath) => {
