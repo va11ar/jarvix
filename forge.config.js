@@ -6,12 +6,18 @@ module.exports = {
       /^\/\.git/,
       /^\/\.qwen/,
     ],
+    win32metadata: {
+      CompanyName: 'JARVIX',
+      FileDescription: 'Desktop application that orchestrates a pipeline of Qwen Code CLI agents',
+      ProductName: 'JARVIX',
+      InternalName: 'JARVIX',
+    },
   },
   rebuildConfig: {},
   makers: [
     {
       name: '@electron-forge/maker-zip',
-      platforms: ['linux'],
+      platforms: ['linux', 'win32'],
     },
     {
       name: '@electron-forge/maker-deb',

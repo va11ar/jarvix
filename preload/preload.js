@@ -124,6 +124,8 @@ contextBridge.exposeInMainWorld('api', {
   qaRoutingConfirmYes:    ()   => ipcRenderer.send('qa:routing-confirm-yes'),
   qaRoutingConfirmNo:     ()   => ipcRenderer.send('qa:routing-confirm-no'),
   onQaRoutingConfirmShow: (cb) => ipcRenderer.on('qa:routing-confirm-show', () => cb()),
+  onQaNoFixerWarn:        (cb) => ipcRenderer.on('qa:no-fixer-warn',       () => cb()),
+  qaNoFixerWarnAck:       ()   => ipcRenderer.send('qa:no-fixer-warn-ack'),
 
   // Cleanup
   removeAllListeners: (channel) => ipcRenderer.removeAllListeners(channel),

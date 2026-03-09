@@ -207,6 +207,8 @@ function registerIpcHandlers(win) {
 
   ipcMain.on(CONSTANTS.IPC.QA_PREFLIGHT_ABORT, () => {})
 
+  ipcMain.on(CONSTANTS.IPC.QA_NO_FIXER_WARN_ACK, () => {})
+
   ipcMain.on(CONSTANTS.IPC.QA_INSTRUCTIONS_CONFIRM, (_, data) => {
     if (data && data.suppress && PipelineRunner.currentProjectPath) {
       ProjectManager.setQaInstructionsSeen(PipelineRunner.currentProjectPath)

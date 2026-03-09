@@ -24,9 +24,11 @@ const STEP_STATUSES = {
 // Regular: no role field (null) — standard agent behavior
 // Producer: role: 'producer' — produces artifacts to Output/, triggers pre-flight discovery
 // Producer Reviewer: role: 'producer-reviewer' — reviews artifacts from Output/
+// Fixer: role: 'fixer' — fixes issues found by QA agent
 const AGENT_ROLES = {
   PRODUCER: 'producer',
   PRODUCER_REVIEWER: 'producer-reviewer',
+  FIXER: 'fixer',
 }
 
 // IPC channel names — never hardcode these inline
@@ -145,6 +147,8 @@ const IPC = {
   QA_ROUTING_CONFIRM_SHOW:   'qa:routing-confirm-show',
   QA_ROUTING_CONFIRM_YES:    'qa:routing-confirm-yes',
   QA_ROUTING_CONFIRM_NO:     'qa:routing-confirm-no',
+  QA_NO_FIXER_WARN:          'qa:no-fixer-warn',
+  QA_NO_FIXER_WARN_ACK:      'qa:no-fixer-warn-ack',
 }
 
 // Hardcoded exclude list — always written into .qwen/settings.json tools.exclude

@@ -32,6 +32,8 @@ class PipelineRunner {
     this.useSandboxMode = false
     this.discoveryCommands = null
     this.qaLoopActive = false
+    this.qaHasRun = false
+    this.noFixerWarningShown = false
   }
 
   /**
@@ -166,6 +168,8 @@ class PipelineRunner {
       this.useSandboxMode = false
       this.discoveryCommands = null
       this.qaLoopActive = false
+      this.qaHasRun = false
+      this.noFixerWarningShown = false
 
       // Determine starting step
       let startIndex = 0
@@ -277,6 +281,18 @@ class PipelineRunner {
         await ActivityLog.append(this.currentProjectPath, `Agent not found: ${step.agent_id}`, 'error')
         this.state = PIPELINE_STATES.ERROR
         return
+      }
+
+      // Skip Fixer agents when QA has not yet run and found issues
+      if (agent.role === AGENT_ROLES.FIXER && !this.qaHasRun) {
+        await ActivityLog.append(this.currentProjectPath, `${agent.name} skipped — QA has not run yet`, 'info')
+        step.status = STEP_STATUSES.SKIPPED
+        await Checkpoint.updateStep(this.currentProjectPath, i, {
+          status: STEP_STATUSES.SKIPPED,
+          completed_at: new Date().toISOString(),
+        })
+        this._notifyStatus()
+        continue
       }
 
       // Skip agents marked as SKIPPED
@@ -466,8 +482,8 @@ class PipelineRunner {
         this.currentAgentProcess = null
         this.currentAgent = null
 
-        // Reset qaLoopActive after producer completes during a QA loop re-run
-        if (agent.role === AGENT_ROLES.PRODUCER && this.qaLoopActive) {
+        // Reset qaLoopActive after producer or fixer completes during a QA loop re-run
+        if ((agent.role === AGENT_ROLES.PRODUCER || agent.role === AGENT_ROLES.FIXER) && this.qaLoopActive) {
           this.qaLoopActive = false
         }
       }
@@ -492,13 +508,17 @@ class PipelineRunner {
           const hasScreenshots = screenshotFiles.length > 0
 
           // Find nearest preceding producer step
+          // Prefer fixer; fall back to producer
           // NOTE: role lives on the agent snapshot, not on the step object.
           let nearestProducerIndex = -1
-          for (let j = i - 1; j >= 0; j--) {
-            if (this.agentSnapshots.get(this.steps[j].agent_id)?.role === AGENT_ROLES.PRODUCER) {
-              nearestProducerIndex = j
-              break
+          for (const preferredRole of [AGENT_ROLES.FIXER, AGENT_ROLES.PRODUCER]) {
+            for (let j = i - 1; j >= 0; j--) {
+              if (this.agentSnapshots.get(this.steps[j].agent_id)?.role === preferredRole) {
+                nearestProducerIndex = j
+                break
+              }
             }
+            if (nearestProducerIndex !== -1) break
           }
 
           if (nearestProducerIndex !== -1) {
@@ -520,14 +540,23 @@ class PipelineRunner {
                 }
               }
 
-              // Route back to producer (with or without screenshots)
+              // Route back to fixer or producer (with or without screenshots)
+              const resolvedRole = this.agentSnapshots.get(this.steps[nearestProducerIndex].agent_id)?.role
+              if (resolvedRole === AGENT_ROLES.PRODUCER && !this.noFixerWarningShown) {
+                this.noFixerWarningShown = true
+                await new Promise((resolve) => {
+                  ipcMain.once(IPC.QA_NO_FIXER_WARN_ACK, resolve)
+                  this.currentWin.webContents.send(IPC.QA_NO_FIXER_WARN)
+                })
+              }
               this.qaLoopActive = true
+              this.qaHasRun = true
               this.steps[nearestProducerIndex].status = STEP_STATUSES.IDLE
               await Checkpoint.updateStep(this.currentProjectPath, nearestProducerIndex, {
                 status: STEP_STATUSES.IDLE,
                 completed_at: null,
               })
-              await ActivityLog.append(this.currentProjectPath, `${agent.name} — routing back to producer for fixes`, 'warn')
+              await ActivityLog.append(this.currentProjectPath, `${agent.name} — routing back for fixes`, 'warn')
               this._notifyStatus()
               i = nearestProducerIndex - 1  // will be incremented by for loop
               continue  // skip outcome block and review loop block

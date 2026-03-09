@@ -170,6 +170,10 @@ function setupIPCListeners() {
   window.api.onQaRoutingConfirmShow(() => {
     showDialog('dialog-qa-routing-confirm')
   })
+
+  window.api.onQaNoFixerWarn(() => {
+    showDialog('dialog-qa-no-fixer-warn')
+  })
 }
 
 // ─── Event Listeners ────────────────────────────────────────────────────────
@@ -270,6 +274,12 @@ function wireEventListeners() {
   document.getElementById('btn-qa-routing-confirm-no').addEventListener('click', () => {
     hideDialog('dialog-qa-routing-confirm')
     window.api.qaRoutingConfirmNo()
+  })
+
+  // QA No Fixer Warning dialog
+  document.getElementById('btn-qa-no-fixer-warn-ok').addEventListener('click', () => {
+    hideDialog('dialog-qa-no-fixer-warn')
+    window.api.qaNoFixerWarnAck()
   })
 
   // Create Agent button (sidebar)

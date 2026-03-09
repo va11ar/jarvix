@@ -60,8 +60,9 @@ async function parseAgentFile(filePath) {
     // Agent role — 'producer' triggers pre-flight discovery and Output folder injection.
     // 'producer-reviewer' triggers Output folder injection for reviewers.
     // 'qa' triggers QA MCP integration.
+    // 'fixer' triggers Fixer-specific pipeline behavior (runs after QA finds issues).
     // null or omitted = Regular agent (no special behavior).
-    role: (meta.role === 'producer' || meta.role === 'producer-reviewer' || meta.role === 'qa') ? meta.role : null,
+    role: (meta.role === 'producer' || meta.role === 'producer-reviewer' || meta.role === 'qa' || meta.role === 'fixer') ? meta.role : null,
     prompt,
   }
 }

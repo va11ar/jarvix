@@ -141,6 +141,7 @@
               <option value="">Regular</option>
               <option value="producer">Producer</option>
               <option value="producer-reviewer">Producer Reviewer</option>
+              <option value="fixer">Fixer</option>
               <option value="qa">QA</option>
             </select>
           </div>
@@ -721,6 +722,25 @@
       <div class="dialog-footer">
         <button class="footer-btn" id="btn-qa-routing-confirm-no">No</button>
         <button class="footer-btn primary" id="btn-qa-routing-confirm-yes">Yes</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- QA No Fixer Warning Dialog -->
+  <div class="overlay overlay-top hidden" id="dialog-qa-no-fixer-warn">
+    <div class="dialog" style="width:520px;">
+      <div class="dialog-header">
+        <div class="dialog-title">No Fixer Agent Detected</div>
+      </div>
+      <div class="dialog-body" style="padding:16px;">
+        <p style="color:var(--text-dim);line-height:1.6;">
+          For best results, the QA agent requires a Fixer role agent in your pipeline.
+          No Fixer agent was detected. The QA agent will fall back to the Producer agent
+          for this run. You can add a Fixer role agent after the run completes.
+        </p>
+      </div>
+      <div class="dialog-footer">
+        <button class="footer-btn primary" id="btn-qa-no-fixer-warn-ok">OK, Continue</button>
       </div>
     </div>
   </div>
