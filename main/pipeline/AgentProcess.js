@@ -14,7 +14,7 @@ const QaMcpRunner = require('../mcp/QaMcpRunner')
 const PIPELINE_STATUS_REGEX = /^PIPELINE_STATUS:\s*(DONE|ERROR)\s*\|?\s*(ISSUES:\s*(true|false)|REASON:\s*.+)?$/m
 
 class AgentProcess extends EventEmitter {
-  constructor(agent, projectPath, outputFilePath, win, useSandbox = false, oauthEnabled = false) {
+  constructor(agent, projectPath, outputFilePath, win, useSandbox = false, oauthEnabled = false, qwenPath = null) {
     super()
     this.agent = agent
     this.projectPath = projectPath
@@ -22,6 +22,7 @@ class AgentProcess extends EventEmitter {
     this.win = win
     this.useSandbox = useSandbox
     this.oauthEnabled = oauthEnabled
+    this.qwenPath = qwenPath
     this.process = null
     this.poller = null
     this.timeoutId = null
@@ -186,9 +187,10 @@ tracking purposes — do not review this file as an artifact.`
       }
 
       // Log spawn info
-      await ActivityLog.append(this.projectPath, `Spawning: qwen ${qwenArgs.slice(0, 3).join(' ')}... (prompt length: ${fullPrompt.length} chars)`, 'info')
+      const qwenCommand = this.qwenPath || 'qwen'
+      await ActivityLog.append(this.projectPath, `Spawning: ${qwenCommand} ${qwenArgs.slice(0, 3).join(' ')}... (prompt length: ${fullPrompt.length} chars)`, 'info')
 
-      this.process = spawn('qwen', qwenArgs, {
+      this.process = spawn(qwenCommand, qwenArgs, {
         cwd: this.projectPath,
         detached: true,
         stdio: ['pipe', 'pipe', 'pipe'],

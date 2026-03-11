@@ -352,6 +352,7 @@ class PipelineRunner {
       // Also check if OAuth is enabled
       const settings = await Settings.load()
       const oauthEnabled = !!settings.oauthEnabled
+      const qwenPath = settings.qwenPath || null
 
       this.currentAgentProcess = new AgentProcess(
         agent,
@@ -359,7 +360,8 @@ class PipelineRunner {
         outputFilePath,
         this.currentWin,
         this.useSandboxMode,
-        oauthEnabled
+        oauthEnabled,
+        qwenPath
       )
       this.currentAgent = this.currentAgentProcess
 
