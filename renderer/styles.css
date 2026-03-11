@@ -506,7 +506,7 @@ html, body {
 
 /* Draggable divider between Pipeline and Library sections */
 .library-pipeline-divider {
-  height: 4px;
+  height: 8px;
   background: var(--border);
   cursor: ns-resize;
   flex-shrink: 0;
