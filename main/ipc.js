@@ -1,4 +1,4 @@
-const { ipcMain, dialog, shell } = require('electron')
+const { ipcMain, dialog, shell, app } = require('electron')
 const fs = require('fs/promises')
 const path = require('path')
 const ProjectManager = require('./project/ProjectManager')
@@ -67,8 +67,8 @@ function registerIpcHandlers(win) {
     }
     const result = await AgentLibrary.createBoilerplate(definition)
     if (result.error) return result
-    // Open the agent in the default editor
-    await shell.openPath(result.filePath)
+    // Open the agent in the default editor (non-blocking — don't wait for editor to close)
+    shell.openPath(result.filePath)
     return { ok: true, agentId: result.id, filePath: result.filePath }
   }))
 
@@ -98,6 +98,28 @@ function registerIpcHandlers(win) {
   ipcMain.handle(CONSTANTS.IPC.CONTEXT_OPEN_OUTPUT,       h((args) => ContextManager.openOutput(args)))
   ipcMain.handle(CONSTANTS.IPC.CONTEXT_OPEN_AGENT_FILE,   h((args) => ContextManager.openAgentFile(args)))
   ipcMain.handle(CONSTANTS.IPC.CONTEXT_OPEN_BRIEF,        h((args) => ContextManager.openBrief(args)))
+  ipcMain.handle(CONSTANTS.IPC.CONTEXT_OPEN_AGENTS_FOLDER, h(async () => {
+    const Settings = require('./settings')
+    const fs = require('fs/promises')
+    const settings = await Settings.load()
+    // Use same path logic as AgentLibrary.getAgentsDir()
+    const agentsFolder = settings.agentsDir || path.join(app.getPath('userData'), 'Agents')
+    // Create the folder if it doesn't exist
+    await fs.mkdir(agentsFolder, { recursive: true })
+    await shell.openPath(agentsFolder)
+    return { ok: true }
+  }))
+
+  // ── Window ───────────────────────────────────────────────────────────────
+  ipcMain.on(CONSTANTS.IPC.SHOW_PREFERENCES_COMING_SOON, h(async () => {
+    const { dialog } = require('electron')
+    await dialog.showMessageBox({
+      type: 'info',
+      title: 'Preferences',
+      message: 'Coming soon!',
+      buttons: ['OK'],
+    })
+  }))
 
   // ── Settings ─────────────────────────────────────────────────────────────
   ipcMain.handle('settings:get', h(() => Settings.load()))

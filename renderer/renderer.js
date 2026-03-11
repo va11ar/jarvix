@@ -85,16 +85,11 @@ async function loadInitialData() {
     // Show first-launch dialog if this is the first launch
     if (firstLaunchResult?.isFirst) {
       showDialog('dialog-first-launch')
-    } else if (!state.currentProject) {
-      // Show welcome dialog if no project is open (not first launch)
-      showDialog('dialog-welcome')
     }
+    // No welcome dialog - user can access New/Open Project from Menu
   } catch (e) {
     appendLogLine('Failed to load initial data: ' + e.message, 'error')
-    // Fallback: if no project is open, show welcome dialog so user isn't stuck
-    if (!state.currentProject) {
-      showDialog('dialog-welcome')
-    }
+    // No welcome dialog - user can access New/Open Project from Menu
   }
 }
 
@@ -184,44 +179,16 @@ function wireEventListeners() {
   document.getElementById('btn-maximize').addEventListener('click', () => window.api.maximizeWindow())
   document.getElementById('btn-close').addEventListener('click', () => window.api.closeWindow())
 
-  // File menu (JARVIX logo)
+  // File menu (Menu button)
   setupFileMenu()
-
-  // Project brief edit
-  document.getElementById('tb-project-name').addEventListener('click', async () => {
-    if (!state.currentProject) return
-    try {
-      const result = await window.api.openBriefFile(state.currentProject.projectPath)
-      if (result.error) {
-        appendLogLine('Failed to open brief: ' + result.error, 'error')
-        return
-      }
-      if (!result.exists) {
-        appendLogLine('Brief file not found. Create one in Context/brief.md', 'warn')
-      }
-    } catch (e) {
-      appendLogLine('Failed to open brief: ' + e.message, 'error')
-    }
-  })
 
   // Pipeline controls
   document.getElementById('btn-start').addEventListener('click', handleStart)
   document.getElementById('btn-pause').addEventListener('click', togglePause)
   document.getElementById('btn-abort').addEventListener('click', handleAbort)
 
-  // Agent controls
-  document.getElementById('btn-continue').addEventListener('click', handleContinue)
-  document.getElementById('btn-kill-agent').addEventListener('click', handleKillAgent)
-  document.getElementById('btn-view-output').addEventListener('click', handleViewOutput)
-  document.getElementById('btn-checkpoint-file').addEventListener('click', handleCheckpointFile)
-
   // Activity log
   document.getElementById('btn-clear-log').addEventListener('click', clearLog)
-
-  // Pipeline structure buttons
-  document.getElementById('btn-add-agent').addEventListener('click', openAddAgentDialog)
-  document.getElementById('btn-remove-agent').addEventListener('click', handleRemoveAgent)
-  document.getElementById('btn-skip-agent').addEventListener('click', handleSkipAgent)
 
   // Add Agent dialog cancel button
   document.getElementById('btn-add-agent-cancel').addEventListener('click', () => {
@@ -406,16 +373,6 @@ function wireEventListeners() {
     }
   })
 
-  // Welcome dialog
-  document.getElementById('btn-welcome-new').addEventListener('click', () => {
-    hideDialog('dialog-welcome')
-    openNewProjectDialog()
-  })
-  document.getElementById('btn-welcome-open').addEventListener('click', async () => {
-    hideDialog('dialog-welcome')
-    await openProjectDialog()
-  })
-
   // First-launch dialog
   document.getElementById('btn-first-launch-create').addEventListener('click', async () => {
     try {
@@ -499,20 +456,23 @@ function wireEventListeners() {
   })
 
   setupLogResize()
+  setupLibraryDividerResize()
 }
 
-// ─── File Menu (JARVIX Logo) ────────────────────────────────────────────────
+// ─── File Menu (Menu Button) ────────────────────────────────────────────────
 
 function setupFileMenu() {
-  const logoMenu = document.getElementById('tb-logo-menu')
+  const menu = document.getElementById('tb-menu')
   const fileMenu = document.getElementById('file-menu')
   const menuNew = document.getElementById('file-menu-new')
   const menuOpen = document.getElementById('file-menu-open')
-  const menuFeedback = document.getElementById('file-menu-feedback')
+  const menuOpenBrief = document.getElementById('file-menu-open-brief')
+  const menuOpenAgentsFolder = document.getElementById('file-menu-open-agents-folder')
+  const menuPreferences = document.getElementById('file-menu-preferences')
   const menuExit = document.getElementById('file-menu-exit')
 
-  // Toggle menu on logo click
-  logoMenu.addEventListener('click', (e) => {
+  // Toggle menu on Menu button click
+  menu.addEventListener('click', (e) => {
     e.stopPropagation()
     const isHidden = fileMenu.classList.contains('hidden')
     // Hide all other menus first
@@ -540,10 +500,22 @@ function setupFileMenu() {
     await handleFileMenuOpen()
   })
 
-  menuFeedback.addEventListener('click', (e) => {
+  menuOpenBrief.addEventListener('click', async (e) => {
     e.stopPropagation()
     hideFileMenu()
-    handleFileMenuFeedback()
+    await handleFileMenuOpenBrief()
+  })
+
+  menuOpenAgentsFolder.addEventListener('click', async (e) => {
+    e.stopPropagation()
+    hideFileMenu()
+    await handleFileMenuOpenAgentsFolder()
+  })
+
+  menuPreferences.addEventListener('click', (e) => {
+    e.stopPropagation()
+    hideFileMenu()
+    handleFileMenuPreferences()
   })
 
   menuExit.addEventListener('click', (e) => {
@@ -552,15 +524,8 @@ function setupFileMenu() {
     handleFileMenuExit()
   })
 
-  // Settings menu item
-  const menuSettings = document.getElementById('file-menu-settings')
-  if (menuSettings) {
-    menuSettings.addEventListener('click', (e) => {
-      e.stopPropagation()
-      hideFileMenu()
-      handleFileMenuSettings()
-    })
-  }
+  // Update Open Brief menu item state based on project status
+  updateMenuItemsState()
 }
 
 function hideFileMenu() {
@@ -589,7 +554,6 @@ async function handleFileMenuNew() {
     appendLogLine('Can not execute action, pipeline needs to be in idle, paused or aborted state first', 'warn')
     return
   }
-  hideDialog('dialog-welcome')
   openNewProjectDialog()
 }
 
@@ -598,21 +562,65 @@ async function handleFileMenuOpen() {
     appendLogLine('Can not execute action, pipeline needs to be in idle, paused or aborted state first', 'warn')
     return
   }
-  hideDialog('dialog-welcome')
   await openProjectDialog()
 }
 
-function handleFileMenuFeedback() {
-  window.api.openExternal('https://tally.so/r/9qdYpQ')
+async function handleFileMenuOpenBrief() {
+  if (!state.currentProject) {
+    appendLogLine('No project open', 'warn')
+    return
+  }
+  try {
+    const result = await window.api.openBriefFile(state.currentProject.projectPath)
+    if (result.error) {
+      appendLogLine('Failed to open brief: ' + result.error, 'error')
+      return
+    }
+    if (!result.exists) {
+      appendLogLine('Brief file not found. Create one in Context/brief.md', 'warn')
+    }
+  } catch (e) {
+    appendLogLine('Failed to open brief: ' + e.message, 'error')
+  }
+}
+
+async function handleFileMenuOpenAgentsFolder() {
+  try {
+    const result = await window.api.openAgentsFolder()
+    if (result.error) {
+      appendLogLine('Failed to open agents folder: ' + result.error, 'error')
+      return
+    }
+  } catch (e) {
+    appendLogLine('Failed to open agents folder: ' + e.message, 'error')
+  }
+}
+
+function handleFileMenuPreferences() {
+  openSettingsDialog()
+  // Switch to Default Folder tab (already the default, but explicit for clarity)
+  switchSettingsTab('default-folder')
 }
 
 function handleFileMenuExit() {
-  window.api.closeWindow()
+  // Show themed exit confirmation dialog
+  showDialog('dialog-exit-confirm')
 }
 
-function handleFileMenuSettings() {
-  openSettingsDialog()
+function updateMenuItemsState() {
+  // Update Open Brief menu item state based on project status
+  const menuOpenBrief = document.getElementById('file-menu-open-brief')
+  if (menuOpenBrief) {
+    if (!state.currentProject) {
+      menuOpenBrief.style.opacity = '0.5'
+      menuOpenBrief.style.pointerEvents = 'none'
+    } else {
+      menuOpenBrief.style.opacity = '1'
+      menuOpenBrief.style.pointerEvents = 'auto'
+    }
+  }
 }
+
 
 // ─── Context Menu ───────────────────────────────────────────────────────────
 
@@ -1686,6 +1694,9 @@ function updateTitlebarStatus() {
   const statusText = state.pipelineState.charAt(0).toUpperCase() + state.pipelineState.slice(1)
   pill.textContent = statusText
 
+  // Update menu items state (e.g., Open Brief enabled/disabled)
+  updateMenuItemsState()
+
   // Show/hide buttons based on pipeline state
   // Start: visible when idle or complete, hidden when running or paused
   // Pause: visible when running or paused, hidden when idle or complete
@@ -1866,10 +1877,8 @@ function renderPipelineAgents() {
 function setPipelineControlsDisabled(disabled) {
   // No buttons are always enabled
   const alwaysEnabled = []
-  // These are disabled when pipeline is empty
-  const disableWhenEmpty = ['btn-remove-agent']
   // These require pipeline to be paused AND have a selected agent
-  const disableWhenNotPaused = ['btn-skip-agent']
+  const disableWhenNotPaused = []
 
   // Always enable these buttons
   alwaysEnabled.forEach(id => {
@@ -1878,7 +1887,7 @@ function setPipelineControlsDisabled(disabled) {
   })
 
   // Disable structural buttons when pipeline is running
-  const disableWhenRunning = ['btn-add-agent', 'btn-create-agent', 'btn-remove-agent']
+  const disableWhenRunning = ['btn-create-agent']
   disableWhenRunning.forEach(id => {
     const btn = document.getElementById(id)
     if (!btn) return
@@ -1889,21 +1898,11 @@ function setPipelineControlsDisabled(disabled) {
         wrapper.setAttribute('data-tip', 'Pause or stop the pipeline first')
       }
     } else {
-      if (id === 'btn-remove-agent') {
-        btn.disabled = disabled // disabled = pipeline is empty
-      } else {
-        btn.disabled = false
-      }
+      btn.disabled = false
       if (wrapper && wrapper.getAttribute('data-tip') === 'Pause or stop the pipeline first') {
         wrapper.removeAttribute('data-tip')
       }
     }
-  })
-
-  // Disable/enable based on whether pipeline has agents
-  disableWhenEmpty.forEach(id => {
-    const btn = document.getElementById(id)
-    if (btn) btn.disabled = disabled
   })
 
   // Disable/enable based on pipeline state
@@ -2390,23 +2389,6 @@ async function updateDetailPanel(libraryAgent = null) {
   } else {
     document.getElementById('detail-reads').textContent = 'None'
   }
-
-  // Update Skip Agent button text based on selected agent status
-  updateSkipAgentButtonText()
-}
-
-function updateSkipAgentButtonText() {
-  const btn = document.getElementById('btn-skip-agent')
-  if (!btn) return
-
-  if (state.selectedNodeIndex === -1 || !state.pipelineSteps[state.selectedNodeIndex]) {
-    btn.textContent = 'Skip Agent'
-    return
-  }
-
-  const selectedStep = state.pipelineSteps[state.selectedNodeIndex]
-  const isSkipped = selectedStep.status === 'skipped'
-  btn.textContent = isSkipped ? 'Unskip Agent' : 'Skip Agent'
 }
 
 /**
@@ -2872,22 +2854,57 @@ function setupLogResize() {
   })
 }
 
+function setupLibraryDividerResize() {
+  const divider = document.getElementById('library-pipeline-divider')
+  const pipelineList = document.getElementById('pipeline-agents-list')
+  const container = document.getElementById('agent-pipeline-list')
+  if (!divider || !container || !pipelineList) return
+
+  // Restore saved heights
+  const savedPipelineHeight = localStorage.getItem('jarvix:pipelineHeight')
+  if (savedPipelineHeight) {
+    const h = parseInt(savedPipelineHeight, 10)
+    const containerHeight = container.offsetHeight
+    if (h >= 60 && h <= containerHeight - 60) {
+      pipelineList.style.height = h + 'px'
+      pipelineList.style.flex = 'none'
+    }
+  }
+
+  divider.addEventListener('mousedown', (startEvent) => {
+    startEvent.preventDefault()
+    const startY = startEvent.clientY
+    const startH = pipelineList.offsetHeight
+    divider.classList.add('dragging')
+    document.body.style.cursor = 'ns-resize'
+    document.body.style.userSelect = 'none'
+
+    function onMove(e) {
+      const delta = e.clientY - startY
+      const containerHeight = container.offsetHeight
+      const newH = Math.max(60, Math.min(startH + delta, containerHeight - 60))
+      pipelineList.style.height = newH + 'px'
+      pipelineList.style.flex = 'none'
+    }
+
+    function onUp() {
+      divider.classList.remove('dragging')
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+      localStorage.setItem('jarvix:pipelineHeight', pipelineList.offsetHeight)
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', onUp)
+    }
+
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
+  })
+}
+
 function escapeHtml(text) {
   const div = document.createElement('div')
   div.textContent = text
   return div.innerHTML
-}
-
-function showBriefTooltip() {
-  const tooltip = document.getElementById('tb-project-tooltip')
-  if (!tooltip) return
-  
-  tooltip.classList.add('visible')
-  
-  // Hide after 3 seconds
-  setTimeout(() => {
-    tooltip.classList.remove('visible')
-  }, 3000)
 }
 
 // ─── Project Management ─────────────────────────────────────────────────────
@@ -2896,10 +2913,7 @@ async function openProjectDialog() {
   try {
     const folderPath = await window.api.openFolderDialog()
     if (!folderPath) {
-      // User cancelled — if no project is open, show welcome dialog again
-      if (!state.currentProject) {
-        showDialog('dialog-welcome')
-      }
+      // User cancelled — no welcome dialog, user can try again from Menu
       return
     }
 
@@ -2930,6 +2944,9 @@ async function loadProject(projectPath) {
 
     state.currentProject = result
     document.getElementById('tb-project-name').textContent = result.projectJson.name
+
+    // Update window title to show "Jarvix -- Project Name"
+    document.title = `Jarvix -- ${result.projectJson.name}`
 
     // Load pipeline steps with agent names
     state.pipelineSteps = (result.pipelineJson.steps || []).map(step => ({
@@ -2967,11 +2984,6 @@ async function loadProject(projectPath) {
     updateAgentControls()
     updateTitlebarStatus()
     updateStatusBar()
-
-    hideDialog('dialog-welcome')
-    
-    // Show tooltip hint for editing brief
-    showBriefTooltip()
   } catch (e) {
     appendLogLine('Failed to load project: ' + e.message, 'error')
   }
@@ -3703,22 +3715,43 @@ async function archiveIncompleteAgentOutput(step) {
 }
 
 function wireNewProjectDialog() {
-  document.getElementById('btn-new-project-cancel').addEventListener('click', () => {
-    hideDialog('dialog-new-project')
-    // If no project is open, show welcome dialog again
-    if (!state.currentProject) {
-      showDialog('dialog-welcome')
-    }
-  })
+  console.log('[wireNewProjectDialog] Attaching event listeners')
+  const cancelBtn = document.getElementById('btn-new-project-cancel')
+  const backBtn = document.getElementById('btn-new-project-back')
+  const nextBtn = document.getElementById('btn-new-project-next')
+  const createBtn = document.getElementById('btn-new-project-create')
+  
+  console.log('[wireNewProjectDialog] Buttons:', { cancelBtn, backBtn, nextBtn, createBtn })
+  
+  if (cancelBtn) {
+    cancelBtn.addEventListener('click', (e) => {
+      console.log('[wireNewProjectDialog] Cancel button clicked')
+      hideDialog('dialog-new-project')
+      // No welcome dialog - user can access New/Open Project from Menu
+    })
+  }
 
-  document.getElementById('btn-new-project-back').addEventListener('click', npRetreat)
+  if (backBtn) {
+    backBtn.addEventListener('click', (e) => {
+      console.log('[wireNewProjectDialog] Back button clicked')
+      npRetreat()
+    })
+  }
 
-  document.getElementById('btn-new-project-next').addEventListener('click', () => {
-    if (state.npStep === 3) npSyncAllowedCommands()
-    npAdvance()
-  })
+  if (nextBtn) {
+    nextBtn.addEventListener('click', (e) => {
+      console.log('[wireNewProjectDialog] Next button clicked')
+      if (state.npStep === 3) npSyncAllowedCommands()
+      npAdvance()
+    })
+  }
 
-  document.getElementById('btn-new-project-create').addEventListener('click', npCreate)
+  if (createBtn) {
+    createBtn.addEventListener('click', (e) => {
+      console.log('[wireNewProjectDialog] Create button clicked')
+      npCreate()
+    })
+  }
 
   document.getElementById('btn-pick-folder').addEventListener('click', async () => {
     const picked = await window.api.openFolderDialog()
@@ -3789,6 +3822,16 @@ function wireNewProjectDialog() {
   document.getElementById('btn-not-first-run-yes').addEventListener('click', () => {
     hideDialog('dialog-not-first-run')
     resolveNotFirstRunDialog('yes')
+  })
+
+  // Exit confirmation dialog
+  document.getElementById('btn-exit-cancel').addEventListener('click', () => {
+    hideDialog('dialog-exit-confirm')
+  })
+
+  document.getElementById('btn-exit-confirm').addEventListener('click', () => {
+    hideDialog('dialog-exit-confirm')
+    window.api.closeWindow()
   })
 
   // Auth warning dialog

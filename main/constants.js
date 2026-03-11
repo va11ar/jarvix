@@ -76,10 +76,14 @@ const IPC = {
   CONTEXT_OPEN_OUTPUT: 'context:open-output',
   CONTEXT_OPEN_AGENT_FILE:       'context:open-agent-file',
   CONTEXT_OPEN_BRIEF:            'context:open-brief',
+  CONTEXT_OPEN_AGENTS_FOLDER:    'context:open-agents-folder',
 
   // Settings
   SETTINGS_GET: 'settings:get',
   SETTINGS_SET: 'settings:set',
+
+  // Window
+  SHOW_PREFERENCES_COMING_SOON: 'show-preferences-coming-soon',
 
   // Authentication
   AUTH_CHECK: 'auth:check',

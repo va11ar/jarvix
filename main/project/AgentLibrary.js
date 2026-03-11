@@ -147,7 +147,7 @@ async function create({ name, reads, review_target, loop, timeout_seconds, allow
  * @param {Object} definition - Agent definition
  * @returns {Promise<{id: string, filePath: string, error?: string}>}
  */
-async function createBoilerplate({ name, reads, review_target, loop, timeout_seconds, allowedCommands, excludedCommands, prompt }) {
+async function createBoilerplate({ name, reads, review_target, loop, timeout_seconds, allowedCommands, excludedCommands, role, prompt }) {
   const AGENTS_DIR = await getAgentsDir()
   const id = crypto.randomUUID()
   const safeName = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')

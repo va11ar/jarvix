@@ -56,10 +56,16 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.invoke('context:open-agent-file', { projectPath, agentFilePath }),
   openBriefFile: (projectPath) =>
     ipcRenderer.invoke('context:open-brief', { projectPath }),
+  openAgentsFolder: () =>
+    ipcRenderer.invoke('context:open-agents-folder'),
 
   // Settings
   getSettings: () => ipcRenderer.invoke('settings:get'),
   saveSettings: (data) => ipcRenderer.invoke('settings:set', data),
+
+  // Window
+  showPreferencesComingSoon: () =>
+    ipcRenderer.send('show-preferences-coming-soon'),
 
   // Authentication
   checkAuth: () => ipcRenderer.invoke('auth:check'),
