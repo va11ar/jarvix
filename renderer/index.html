@@ -271,31 +271,81 @@
     </div>
   </div>
 
-  <!-- First Launch Dialog (shown only on first launch) -->
-  <div class="overlay hidden" id="dialog-first-launch">
-    <div class="dialog" style="width:520px;">
-      <div class="dialog-header">
-        <div class="dialog-title">Welcome to JARVIX</div>
+  <!-- Onboarding Dialog -->
+  <div class="overlay hidden" id="dialog-onboarding">
+    <div class="dialog onboarding-dialog">
+      <div class="onboarding-header">
+        <div class="onboarding-title">Welcome to Jarvix!</div>
+        <div class="onboarding-subtitle">An AI agent orchestrator that helps you simulate a full software development life cycle.</div>
       </div>
-      <div class="dialog-body" style="padding:20px 16px;">
-        <p style="color:var(--text);margin-bottom:12px;font-size:13px;">
-          This appears to be the first time you've launched JARVIX.
-        </p>
-        <p style="color:var(--text-dim);margin-bottom:16px;line-height:1.6;">
-          JARVIX orchestrates a sequential pipeline of AI coding agents to execute a software development lifecycle. 
-          Each agent is a specialized role (Architect, Programmer, Reviewer, etc.) that reads context files, performs its task, 
-          and writes output to a shared project folder.
-        </p>
-        <p style="color:var(--text-dim);margin-bottom:16px;line-height:1.6;">
-          Before creating a project, you'll need at least one agent in your library. Let's start by creating an agent.
-        </p>
-        <p style="color:var(--text-faint);font-size:10px;margin-bottom:8px;">
-          A boilerplate agent file will be created and opened in your default editor. The file includes comments explaining each section.
-        </p>
+      
+      <div class="onboarding-body">
+        <!-- Step 1: Dependencies -->
+        <div class="onboarding-step" id="onboarding-step-1">
+          <div class="onboarding-step-title">Let's get started</div>
+          <p class="onboarding-text">
+            Jarvix has a few dependencies that it runs on. It uses Qwen CLI under the hood as agents that work on your project brief. 
+            Qwen CLI in turn requires NodeJS to function. So you'll need to install both on your system:
+          </p>
+          <div class="onboarding-links">
+            <a href="#" class="onboarding-link" id="btn-onboarding-nodejs" data-url="https://nodejs.org/">Install Node.js</a>
+            <a href="#" class="onboarding-link" id="btn-onboarding-qwen" data-url="https://github.com/QwenLM/Qwen">Install Qwen CLI</a>
+          </div>
+          <p class="onboarding-text">
+            When you've done both, please run <code>qwen --version</code> in a command line to make sure it is working and then press "Next".
+          </p>
+        </div>
+
+        <!-- Step 2: Qwen Verification -->
+        <div class="onboarding-step hidden" id="onboarding-step-2">
+          <div class="onboarding-step-title">Verifying Qwen Installation</div>
+          <p class="onboarding-text">Checking if Qwen CLI is available on your system...</p>
+          <div class="onboarding-status" id="onboarding-qwen-status"></div>
+        </div>
+
+        <!-- Step 3: Authentication -->
+        <div class="onboarding-step hidden" id="onboarding-step-3">
+          <div class="onboarding-step-title">Authenticate with an AI Provider</div>
+          <p class="onboarding-text">
+            Now that we have everything we need, next we'll authenticate Jarvix so it can run Qwen without having to ask you every single time it launches an agent.
+          </p>
+          <p class="onboarding-text">There are two ways to use Qwen:</p>
+          <ol class="onboarding-list">
+            <li><strong>OAuth</strong> — Create a Qwen account and use Qwen models as the agents. Qwen provides 1000 requests per day free.</li>
+            <li><strong>API Key</strong> — Use an API key from one of the supported providers: OpenAI, OpenRouter, and more.</li>
+          </ol>
+          <p class="onboarding-text onboarding-note">
+            You can change this any time from the Settings menu under File → Preferences.
+          </p>
+          <div class="onboarding-actions">
+            <button class="footer-btn" id="btn-onboarding-authenticate">Authenticate</button>
+          </div>
+        </div>
+
+        <!-- Step 4: Agents Info -->
+        <div class="onboarding-step hidden" id="onboarding-step-4">
+          <div class="onboarding-step-title">About Agents</div>
+          <p class="onboarding-text">
+            Great, now that you've finished the setup, you can create a new project. One last thing before we let you go.
+          </p>
+          <p class="onboarding-text">
+            Jarvix uses what we call agents. Each agent is a Qwen instance that is running under the hood. 
+            Each agent has a persona or a role that it plays in the pipeline (the development process of your project). 
+            These agents are defined as <code>.md</code> files. You can modify them any time by editing the files in:
+          </p>
+          <div class="onboarding-path" id="onboarding-agents-path"></div>
+          <p class="onboarding-text">
+            Jarvix ships with some ready made agents that we believe work well with most software development pipelines. 
+            Feel free to read them, edit or create new ones.
+          </p>
+        </div>
       </div>
-      <div class="dialog-footer">
-        <button class="footer-btn" id="btn-first-launch-cancel">Cancel</button>
-        <button class="footer-btn primary" id="btn-first-launch-create">Create Agent</button>
+
+      <div class="onboarding-footer">
+        <div class="onboarding-footer-status" id="onboarding-footer-status"></div>
+        <button class="footer-btn hidden" id="btn-onboarding-back">Back</button>
+        <button class="footer-btn primary" id="btn-onboarding-next">Next</button>
+        <button class="footer-btn primary hidden" id="btn-onboarding-finish">I am ready to start</button>
       </div>
     </div>
   </div>

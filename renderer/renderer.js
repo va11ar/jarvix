@@ -72,24 +72,22 @@ document.addEventListener('DOMContentLoaded', async () => {
 
 async function loadInitialData() {
   try {
-    const [agentResult, projects, firstLaunchResult] = await Promise.all([
+    const [agentResult, projects, onboardingResult] = await Promise.all([
       window.api.listAgents(),
       window.api.listProjects(),
-      window.api.checkFirstLaunch(),
+      window.api.checkOnboarding(),
     ])
     state.agents = agentResult?.agents || []
     state.agentLoadErrors = agentResult?.errors || []
     state.projects = projects || []
     updateStatusBar()
 
-    // Show first-launch dialog if this is the first launch
-    if (firstLaunchResult?.isFirst) {
-      showDialog('dialog-first-launch')
+    // Show onboarding dialog if not completed
+    if (!onboardingResult?.completed) {
+      showOnboardingDialog()
     }
-    // No welcome dialog - user can access New/Open Project from Menu
   } catch (e) {
     appendLogLine('Failed to load initial data: ' + e.message, 'error')
-    // No welcome dialog - user can access New/Open Project from Menu
   }
 }
 
@@ -373,33 +371,6 @@ function wireEventListeners() {
     }
   })
 
-  // First-launch dialog
-  document.getElementById('btn-first-launch-create').addEventListener('click', async () => {
-    try {
-      const result = await window.api.createBoilerplateAgent()
-      if (result.error) {
-        appendLogLine('Failed to create boilerplate agent: ' + result.error, 'error')
-        return
-      }
-      // Mark first launch as done
-      await window.api.markFirstLaunchDone()
-      hideDialog('dialog-first-launch')
-      appendLogLine('Boilerplate agent created and opened in editor', 'ok')
-      // After creating agent, show new project dialog
-      openNewProjectDialog()
-    } catch (e) {
-      appendLogLine('Failed to create boilerplate agent: ' + e.message, 'error')
-    }
-  })
-
-  document.getElementById('btn-first-launch-cancel').addEventListener('click', async () => {
-    // Mark first launch as done even if user cancels
-    await window.api.markFirstLaunchDone()
-    hideDialog('dialog-first-launch')
-    // Show new project dialog anyway - user can create project without agents
-    openNewProjectDialog()
-  })
-
   // Context menu
   setupContextMenu()
 
@@ -457,6 +428,184 @@ function wireEventListeners() {
 
   setupLogResize()
   setupLibraryDividerResize()
+
+  // Onboarding dialog
+  setupOnboardingDialog()
+}
+
+// ─── Onboarding Dialog ──────────────────────────────────────────────────────
+
+let onboardingCurrentStep = 1
+let onboardingSettingsDialogOpen = false
+let qwenNotFoundInOnboarding = false
+
+function showOnboardingDialog() {
+  onboardingCurrentStep = 1
+  showDialog('dialog-onboarding')
+  showOnboardingStep(1)
+  // Load agents directory path for step 4
+  loadAgentsDirPath()
+}
+
+async function loadAgentsDirPath() {
+  try {
+    const result = await window.api.getAgentsDirPath()
+    const pathEl = document.getElementById('onboarding-agents-path')
+    if (pathEl && result.path) {
+      pathEl.textContent = result.path
+    }
+  } catch (e) {
+    appendLogLine('Failed to load agents dir path: ' + e.message, 'error')
+  }
+}
+
+function showOnboardingStep(step) {
+  // Hide all steps
+  for (let i = 1; i <= 4; i++) {
+    const stepEl = document.getElementById(`onboarding-step-${i}`)
+    if (stepEl) {
+      stepEl.classList.add('hidden')
+    }
+  }
+
+  // Show current step
+  const currentStepEl = document.getElementById(`onboarding-step-${step}`)
+  if (currentStepEl) {
+    currentStepEl.classList.remove('hidden')
+  }
+
+  // Update footer buttons
+  const backBtn = document.getElementById('btn-onboarding-back')
+  const nextBtn = document.getElementById('btn-onboarding-next')
+  const finishBtn = document.getElementById('btn-onboarding-finish')
+
+  if (backBtn) {
+    backBtn.classList.toggle('hidden', step === 1)
+  }
+  if (nextBtn) {
+    nextBtn.classList.toggle('hidden', step === 4)
+  }
+  if (finishBtn) {
+    finishBtn.classList.toggle('hidden', step !== 4)
+  }
+
+  onboardingCurrentStep = step
+}
+
+async function setupOnboardingDialog() {
+  // Open external links
+  document.getElementById('btn-onboarding-nodejs').addEventListener('click', async (e) => {
+    e.preventDefault()
+    const url = e.currentTarget.dataset.url
+    await window.api.openExternal(url)
+  })
+
+  document.getElementById('btn-onboarding-qwen').addEventListener('click', async (e) => {
+    e.preventDefault()
+    const url = e.currentTarget.dataset.url
+    await window.api.openExternal(url)
+  })
+
+  // Next button
+  document.getElementById('btn-onboarding-next').addEventListener('click', async () => {
+    if (onboardingCurrentStep === 1) {
+      // Go to step 2: verify Qwen
+      await verifyQwenInstallation()
+    } else if (onboardingCurrentStep === 2) {
+      // Go to step 3: authentication
+      showOnboardingStep(3)
+    } else if (onboardingCurrentStep === 3) {
+      // Go to step 4: agents info
+      showOnboardingStep(4)
+    }
+  })
+
+  // Back button
+  document.getElementById('btn-onboarding-back').addEventListener('click', () => {
+    if (onboardingCurrentStep === 2) {
+      showOnboardingStep(1)
+    } else if (onboardingCurrentStep === 3) {
+      showOnboardingStep(2)
+    } else if (onboardingCurrentStep === 4) {
+      showOnboardingStep(3)
+    }
+  })
+
+  // Authenticate button (opens Settings dialog on top)
+  document.getElementById('btn-onboarding-authenticate').addEventListener('click', () => {
+    openSettingsDialog()
+    onboardingSettingsDialogOpen = true
+  })
+
+  // Finish button
+  document.getElementById('btn-onboarding-finish').addEventListener('click', async () => {
+    await completeOnboarding()
+  })
+
+  // Listen for settings dialog close
+  const settingsDialog = document.getElementById('dialog-settings')
+  if (settingsDialog) {
+    const observer = new MutationObserver((mutations) => {
+      mutations.forEach((mutation) => {
+        if (mutation.attributeName === 'class') {
+          const isHidden = settingsDialog.classList.contains('hidden')
+          if (isHidden && onboardingSettingsDialogOpen) {
+            onboardingSettingsDialogOpen = false
+            // User closed settings, they can now click Next
+          }
+        }
+      })
+    })
+    observer.observe(settingsDialog, { attributes: true })
+  }
+}
+
+async function verifyQwenInstallation() {
+  const statusEl = document.getElementById('onboarding-qwen-status')
+  if (statusEl) {
+    statusEl.textContent = 'Checking...'
+    statusEl.className = 'onboarding-status-checking'
+  }
+
+  showOnboardingStep(2)
+
+  try {
+    const result = await window.api.checkQwenInstalled(null)
+    if (result.installed) {
+      if (statusEl) {
+        statusEl.textContent = 'Qwen CLI is installed and ready!'
+        statusEl.className = 'onboarding-status-ok'
+      }
+      // User clicks Next to continue to step 3
+    } else {
+      // Qwen not found - show error dialog
+      showQwenNotFoundDialog()
+    }
+  } catch (e) {
+    if (statusEl) {
+      statusEl.textContent = 'Error checking Qwen installation: ' + e.message
+      statusEl.className = 'onboarding-status-error'
+    }
+  }
+}
+
+function showQwenNotFoundDialog() {
+  const commandEl = document.getElementById('qwen-command-display')
+  if (commandEl) {
+    commandEl.textContent = 'qwen'
+  }
+  qwenNotFoundInOnboarding = true
+  showDialog('dialog-qwen-not-found')
+}
+
+async function completeOnboarding() {
+  try {
+    await window.api.markOnboardingDone()
+    hideDialog('dialog-onboarding')
+    appendLogLine('Onboarding completed. Welcome to Jarvix!', 'ok')
+  } catch (e) {
+    appendLogLine('Failed to complete onboarding: ' + e.message, 'error')
+  }
 }
 
 // ─── File Menu (Menu Button) ────────────────────────────────────────────────
@@ -1585,7 +1734,16 @@ function handleQwenNotFound(data) {
   // OK button - dismiss dialog and abort
   newOkBtn.addEventListener('click', () => {
     hideDialog('dialog-qwen-not-found')
-    if (qwenResponseCallback) {
+    if (qwenNotFoundInOnboarding) {
+      // Onboarding flow - return to step 1
+      qwenNotFoundInOnboarding = false
+      showOnboardingStep(1)
+      const statusEl = document.getElementById('onboarding-qwen-status')
+      if (statusEl) {
+        statusEl.textContent = ''
+        statusEl.className = ''
+      }
+    } else if (qwenResponseCallback) {
       qwenResponseCallback({ action: 'cancel' })
       qwenResponseCallback = null
     }

@@ -94,10 +94,10 @@ const IPC = {
   AUTH_SET_OAUTH_ENABLED:        'auth:set-oauth-enabled',
   AUTH_RESTORE_OAUTH_DEFAULTS:   'auth:restore-oauth-defaults',
 
-  // First Launch
-  FIRST_LAUNCH_CHECK:            'first-launch:check',
-  FIRST_LAUNCH_MARK_DONE:        'first-launch:mark-done',
-  FIRST_LAUNCH_CREATE_BOILERPLATE: 'first-launch:create-boilerplate',
+  // Onboarding
+  ONBOARDING_CHECK:              'onboarding:check',
+  ONBOARDING_MARK_DONE:          'onboarding:mark-done',
+  GET_AGENTS_DIR_PATH:           'agents:get-dir-path',
 
   // Qwen installation
   QWEN_CHECK_INSTALLED: 'qwen:check-installed',

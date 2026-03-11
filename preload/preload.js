@@ -18,10 +18,10 @@ contextBridge.exposeInMainWorld('api', {
   updateLoopConfig: (agentId, loopType, maxRevisionLoops) => ipcRenderer.invoke('agents:update-loop-config', { agentId, loopType, maxRevisionLoops }),
   updateAgentRole: (agentId, role) => ipcRenderer.invoke('agents:update-role', { agentId, role }),
 
-  // First Launch
-  checkFirstLaunch: () => ipcRenderer.invoke('first-launch:check'),
-  markFirstLaunchDone: () => ipcRenderer.invoke('first-launch:mark-done'),
-  createBoilerplateAgent: () => ipcRenderer.invoke('first-launch:create-boilerplate'),
+  // Onboarding
+  checkOnboarding: () => ipcRenderer.invoke('onboarding:check'),
+  markOnboardingDone: () => ipcRenderer.invoke('onboarding:mark-done'),
+  getAgentsDirPath: () => ipcRenderer.invoke('agents:get-dir-path'),
 
   // Pipeline
   startPipeline: (projectPath, resumeFrom) => ipcRenderer.invoke('pipeline:start', { projectPath, resumeFrom }),

@@ -34,27 +34,27 @@ async function save(data) {
 }
 
 /**
- * Check if this is the first launch of the app
+ * Check if onboarding has been completed
  * @returns {Promise<boolean>}
  */
-async function isFirstLaunch() {
+async function isOnboardingCompleted() {
   try {
     const raw = await fs.readFile(SETTINGS_PATH, 'utf8')
     const settings = JSON.parse(raw)
-    return !settings.hasLaunchedBefore
+    return !!settings.onboardingCompleted
   } catch {
-    // File doesn't exist — this is the first launch
-    return true
+    // File doesn't exist — onboarding not completed
+    return false
   }
 }
 
 /**
- * Mark the app as having been launched
+ * Mark onboarding as completed
  * @returns {Promise<{ok: boolean, error?: string}>}
  */
-async function markLaunched() {
+async function markOnboardingCompleted() {
   const settings = await load()
-  settings.hasLaunchedBefore = true
+  settings.onboardingCompleted = true
   return save(settings)
 }
 
@@ -96,4 +96,4 @@ async function checkQwenInstalled(customPath) {
   }
 }
 
-module.exports = { load, save, isFirstLaunch, markLaunched, checkQwenInstalled }
+module.exports = { load, save, isOnboardingCompleted, markOnboardingCompleted, checkQwenInstalled }

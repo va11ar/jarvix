@@ -41,36 +41,24 @@ function registerIpcHandlers(win) {
   ipcMain.handle(CONSTANTS.IPC.AGENTS_UPDATE_LOOP_CONFIG, h(({ agentId, loopType, maxRevisionLoops }) => AgentLibrary.updateLoopConfig(agentId, loopType, maxRevisionLoops)))
   ipcMain.handle(CONSTANTS.IPC.AGENTS_UPDATE_ROLE, h(({ agentId, role }) => AgentLibrary.updateRole(agentId, role)))
 
-  // ── First Launch ─────────────────────────────────────────────────────────
-  ipcMain.handle(CONSTANTS.IPC.FIRST_LAUNCH_CHECK, h(async () => {
-    const isFirst = await Settings.isFirstLaunch()
-    return { isFirst }
+  // ── Onboarding ──────────────────────────────────────────────────────────
+  ipcMain.handle(CONSTANTS.IPC.ONBOARDING_CHECK, h(async () => {
+    const completed = await Settings.isOnboardingCompleted()
+    return { completed }
   }))
 
-  ipcMain.handle(CONSTANTS.IPC.FIRST_LAUNCH_MARK_DONE, h(async () => {
-    await Settings.markLaunched()
+  ipcMain.handle(CONSTANTS.IPC.ONBOARDING_MARK_DONE, h(async () => {
+    await Settings.markOnboardingCompleted()
     return { ok: true }
   }))
 
-  ipcMain.handle(CONSTANTS.IPC.FIRST_LAUNCH_CREATE_BOILERPLATE, h(async () => {
-    // Create a minimal boilerplate agent
-    const definition = {
-      name: 'MyAgent',
-      reads: ['Context/brief.md'],
-      review_target: null,
-      loop: null,
-      timeout_seconds: 300,
-      allowedCommands: [],
-      excludedCommands: [],
-      prompt: '',
-      isBoilerplate: true,
-    }
-    const result = await AgentLibrary.createBoilerplate(definition)
-    if (result.error) return result
-    // Open the agent in the default editor (non-blocking — don't wait for editor to close)
-    shell.openPath(result.filePath)
-    return { ok: true, agentId: result.id, filePath: result.filePath }
+  ipcMain.handle(CONSTANTS.IPC.GET_AGENTS_DIR_PATH, h(async () => {
+    const Settings = require('./settings')
+    const settings = await Settings.load()
+    const agentsDir = settings.agentsDir || path.join(app.getPath('userData'), 'Agents')
+    return { path: agentsDir }
   }))
+
 
   // ── Pipeline ─────────────────────────────────────────────────────────────
   ipcMain.handle('pipeline:start', h((args) => PipelineRunner.start(args.projectPath, args.resumeFrom, win)))
