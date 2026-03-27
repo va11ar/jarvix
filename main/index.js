@@ -41,21 +41,26 @@ function createWindow() {
 app.whenReady().then(async () => {
   createWindow()
 
-  // Startup: detect incomplete runs across all known projects
-  const projects = await ProjectManager.listAll()
-  for (const project of projects) {
-    const incomplete = await Checkpoint.detect(project.projectPath)
-    if (incomplete) {
-      win.webContents.once('did-finish-load', () => {
-        win.webContents.send('pipeline:incomplete-run-detected', {
-          projectPath: project.projectPath,
-          projectName: project.name,
-          incompleteStep: incomplete.incompleteStep,
-        })
-      })
-      break
+  // Defer heavy I/O operations to avoid blocking UI startup
+  // Run checkpoint detection asynchronously after window is ready
+  setImmediate(async () => {
+    try {
+      const projects = await ProjectManager.listAll()
+      for (const project of projects) {
+        const incomplete = await Checkpoint.detect(project.projectPath)
+        if (incomplete) {
+          win.webContents.send('pipeline:incomplete-run-detected', {
+            projectPath: project.projectPath,
+            projectName: project.name,
+            incompleteStep: incomplete.incompleteStep,
+          })
+          break
+        }
+      }
+    } catch (e) {
+      console.error('Failed to detect incomplete runs:', e.message)
     }
-  }
+  })
 })
 
 app.on('window-all-closed', () => {

@@ -1,0 +1,11 @@
+{
+  "javascript": {
+    "command": "typescript-language-server",
+    "args": ["--stdio"],
+    "extensionToLanguage": {
+      ".js": "javascript",
+      ".mjs": "javascript",
+      ".cjs": "javascript"
+    }
+  }
+}

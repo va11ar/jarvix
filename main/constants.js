@@ -45,6 +45,7 @@ const IPC = {
   AGENTS_LIST: 'agents:list',
   AGENTS_GET: 'agents:get',
   AGENTS_CREATE: 'agents:create',
+  AGENTS_CREATE_BOILERPLATE: 'agents:create-boilerplate',
   AGENTS_USAGE_COUNT: 'agents:usageCount',
   AGENTS_UPDATE_REVIEW_TARGET:   'agents:update-review-target',
   AGENTS_UPDATE_LOOP_CONFIG:     'agents:update-loop-config',
@@ -98,6 +99,7 @@ const IPC = {
   ONBOARDING_CHECK:              'onboarding:check',
   ONBOARDING_MARK_DONE:          'onboarding:mark-done',
   GET_AGENTS_DIR_PATH:           'agents:get-dir-path',
+  AGENTS_COPY_TO_LIBRARY:        'agents:copy-to-library',
 
   // Qwen installation
   QWEN_CHECK_INSTALLED: 'qwen:check-installed',

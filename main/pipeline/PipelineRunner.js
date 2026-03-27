@@ -794,8 +794,8 @@ class PipelineRunner {
 
     const step = this.steps[stepIndex]
 
-    // Can't skip already completed or skipped agents
-    if (step.status === STEP_STATUSES.COMPLETE || step.status === STEP_STATUSES.ERROR) {
+    // Can't skip already completed or skipped agents (but CAN skip ERROR status for Resume)
+    if (step.status === STEP_STATUSES.COMPLETE) {
       return { ok: false, error: 'Cannot skip a completed agent' }
     }
 
@@ -929,6 +929,98 @@ class PipelineRunner {
     // Log the unskip
     const ActivityLog = require('./ActivityLog')
     await ActivityLog.append(targetPath, `${agent?.name || 'Unknown'} unskipped`, 'info')
+
+    // Notify renderer if we have a window
+    if (this.currentWin) {
+      this._notifyStatus()
+    }
+
+    return { ok: true, agentName: agent?.name || 'Unknown' }
+  }
+
+  /**
+   * Retry a failed agent by resetting its status to IDLE
+   * @param {number} stepIndex - Index of the step to retry
+   * @param {string} projectPath - Project path (optional, uses currentProjectPath if not provided)
+   * @returns {Promise<{ok: boolean, error?: string, agentName?: string}>}
+   */
+  async retryAgent(stepIndex, projectPath) {
+    // Can only retry when pipeline is NOT running (idle, paused, or complete/error)
+    if (this.state === PIPELINE_STATES.RUNNING) {
+      return { ok: false, error: 'Pipeline must not be running to retry an agent' }
+    }
+
+    const targetPath = projectPath || this.currentProjectPath
+
+    // If steps not loaded (pipeline never started), load from disk
+    if (this.steps.length === 0 && targetPath) {
+      try {
+        const fs = require('fs/promises')
+        const pipelineJson = JSON.parse(
+          await fs.readFile(require('path').join(targetPath, 'Pipeline', 'pipeline.json'), 'utf8')
+        )
+        this.steps = (pipelineJson.steps || []).map(step => ({
+          ...step,
+          status: STEP_STATUSES.IDLE,
+        }))
+        // Load agent snapshots
+        this.agentSnapshots.clear()
+        const AgentLibrary = require('../project/AgentLibrary')
+        for (const step of this.steps) {
+          const agent = await AgentLibrary.getById(step.agent_id)
+          if (agent) this.agentSnapshots.set(step.agent_id, agent)
+        }
+      } catch (e) {
+        return { ok: false, error: 'Failed to load pipeline configuration' }
+      }
+    }
+
+    // Validate step index
+    if (stepIndex < 0 || stepIndex >= this.steps.length) {
+      return { ok: false, error: 'Invalid step index' }
+    }
+
+    const step = this.steps[stepIndex]
+
+    // Can only retry agents with ERROR status
+    if (step.status !== STEP_STATUSES.ERROR) {
+      return { ok: false, error: 'Agent must have ERROR status to retry' }
+    }
+
+    const agent = this.agentSnapshots.get(step.agent_id)
+
+    // Update in-memory status
+    step.status = STEP_STATUSES.IDLE
+
+    // Update checkpoint (create if doesn't exist)
+    let checkpoint = await Checkpoint.load(targetPath)
+    if (!checkpoint) {
+      const fs = require('fs/promises')
+      const projectJson = JSON.parse(
+        await fs.readFile(require('path').join(targetPath, 'project.json'), 'utf8')
+      )
+      await Checkpoint.save(targetPath, {
+        run_id: new Date().toISOString(),
+        pipeline: projectJson.name,
+        steps: this.steps.map(s => ({
+          agent_id: s.agent_id,
+          agent_name: this.agentSnapshots.get(s.agent_id)?.name || 'Unknown',
+          started_at: null,
+          completed_at: null,
+          status: s.status || STEP_STATUSES.IDLE,
+        })),
+        loop_counts: {},
+      })
+    } else {
+      await Checkpoint.updateStep(targetPath, stepIndex, {
+        status: STEP_STATUSES.IDLE,
+        completed_at: null,
+      })
+    }
+
+    // Log the retry
+    const ActivityLog = require('./ActivityLog')
+    await ActivityLog.append(targetPath, `${agent?.name || 'Unknown'} reset for retry`, 'info')
 
     // Notify renderer if we have a window
     if (this.currentWin) {

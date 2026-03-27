@@ -236,9 +236,14 @@ tracking purposes — do not review this file as an artifact.`
 
       // Handle stderr - collect for potential error reporting
       const stderrLines = []
+      let approvalError = false
       this.process.stderr.on('data', (data) => {
         const line = data.toString().trim()
         stderrLines.push(line)
+        // Detect approval-related errors
+        if (line.includes('requires user approval') || line.includes('non-interactive mode')) {
+          approvalError = true
+        }
         ActivityLog.append(this.projectPath, `Agent stderr: ${line}`, 'qwen')
       })
 
@@ -307,6 +312,9 @@ tracking purposes — do not review this file as an artifact.`
                 for (const line of stdoutLines.slice(0, 10)) {
                   await ActivityLog.append(this.projectPath, `  stdout: ${line}`, 'error')
                 }
+              } else if (approvalError) {
+                // Approval error detected in stderr — report the specific cause
+                await ActivityLog.append(this.projectPath, `Agent failed due to malformed output. This is likely due to requiring approval in non-interactive mode.`, 'error')
               } else {
                 // No status in stdout either — log details
                 await ActivityLog.append(this.projectPath, `Agent output file not found at: ${this.outputFilePath}`, 'warn')
@@ -380,6 +388,8 @@ tracking purposes — do not review this file as an artifact.`
                 for (const line of stdoutLines.slice(0, 10)) {
                   await ActivityLog.append(this.projectPath, `  stdout: ${line}`, 'error')
                 }
+              } else if (approvalError) {
+                await ActivityLog.append(this.projectPath, `Agent failed due to malformed output. This is likely due to requiring approval in non-interactive mode.`, 'error')
               } else {
                 await ActivityLog.append(this.projectPath, `Agent process error: ${err.message}`, 'error')
                 await ActivityLog.append(this.projectPath, `Agent output file not found at: ${this.outputFilePath}`, 'warn')

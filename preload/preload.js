@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld('api', {
   listAgents: () => ipcRenderer.invoke('agents:list'),
   getAgent: (id) => ipcRenderer.invoke('agents:get', id),
   createAgent: (def) => ipcRenderer.invoke('agents:create', def),
+  createBoilerplateAgent: (args) => ipcRenderer.invoke('agents:create-boilerplate', args),
   agentUsageCount: (id) => ipcRenderer.invoke('agents:usageCount', id),
   updateAgentReviewTarget: (agentId, reviewTargetId) => ipcRenderer.invoke('agents:update-review-target', { agentId, reviewTargetId }),
   updateLoopConfig: (agentId, loopType, maxRevisionLoops) => ipcRenderer.invoke('agents:update-loop-config', { agentId, loopType, maxRevisionLoops }),
@@ -22,6 +23,7 @@ contextBridge.exposeInMainWorld('api', {
   checkOnboarding: () => ipcRenderer.invoke('onboarding:check'),
   markOnboardingDone: () => ipcRenderer.invoke('onboarding:mark-done'),
   getAgentsDirPath: () => ipcRenderer.invoke('agents:get-dir-path'),
+  copyAgentsToLibrary: () => ipcRenderer.invoke('agents:copy-to-library'),
 
   // Pipeline
   startPipeline: (projectPath, resumeFrom) => ipcRenderer.invoke('pipeline:start', { projectPath, resumeFrom }),
@@ -31,6 +33,7 @@ contextBridge.exposeInMainWorld('api', {
   updatePipelineSteps: (steps, projectPath) => ipcRenderer.invoke('pipeline:update-steps', { steps, projectPath }),
   skipAgent: (stepIndex, projectPath) => ipcRenderer.invoke('pipeline:skip-agent', { stepIndex, projectPath }),
   unskipAgent: (stepIndex, projectPath) => ipcRenderer.invoke('pipeline:unskip-agent', { stepIndex, projectPath }),
+  retryAgent: (stepIndex, projectPath) => ipcRenderer.invoke('pipeline:retry-agent', { stepIndex, projectPath }),
   killAgent: () => ipcRenderer.invoke('agent:kill'),
   pipelineHasRunBefore: (projectPath) => ipcRenderer.invoke('pipeline:has-run-before', { projectPath }),
   resetPipeline: (projectPath) => ipcRenderer.invoke('pipeline:reset', { projectPath }),

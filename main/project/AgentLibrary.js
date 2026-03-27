@@ -498,4 +498,66 @@ async function updateRole(agentId, role) {
   }
 }
 
-module.exports = { parseAgentFile, create, createBoilerplate, list, getById, usageCount, updateReviewTarget, updateLoopConfig, updateRole }
+/**
+ * Copy bundled agents from agent-samples/ to the user's Agents library
+ * Only copies agents that don't already exist in the library (by name)
+ * @returns {Promise<{ok: boolean, copied?: number, skipped?: number, error?: string}>}
+ */
+async function copyBundledAgentsToLibrary() {
+  try {
+    const fsSync = require('fs')
+    const userAgentsDir = await getAgentsDir()
+
+    // Ensure user agents directory exists
+    await fs.mkdir(userAgentsDir, { recursive: true })
+
+    // Determine bundled agents directory path
+    // In development: app.getAppPath() returns the project root
+    // In production: agent-samples should be copied to app resources
+    let bundledAgentsDir = path.join(app.getAppPath(), 'agent-samples')
+    
+    // If not found, try the resources/app path (for packaged app)
+    if (!fsSync.existsSync(bundledAgentsDir)) {
+      bundledAgentsDir = path.join(process.resourcesPath, 'app', 'agent-samples')
+    }
+
+    // Check if bundled agents directory exists
+    if (!fsSync.existsSync(bundledAgentsDir)) {
+      return { error: 'Bundled agents directory not found' }
+    }
+
+    // Get list of bundled agent files
+    const bundledFiles = await fs.readdir(bundledAgentsDir)
+    const agentFiles = bundledFiles.filter(f => f.endsWith('.md'))
+
+    // Get list of existing user agents (by name)
+    const existingAgents = await list()
+    const existingNames = new Set(existingAgents.map(a => a.name.toLowerCase()))
+
+    let copied = 0
+    let skipped = 0
+
+    for (const file of agentFiles) {
+      const bundledPath = path.join(bundledAgentsDir, file)
+      const userPath = path.join(userAgentsDir, file)
+
+      // Skip if agent with same name already exists
+      const agentName = path.basename(file, '.md')
+      if (existingNames.has(agentName.toLowerCase())) {
+        skipped++
+        continue
+      }
+
+      // Copy the file
+      const content = await fs.readFile(bundledPath, 'utf8')
+      await fs.writeFile(userPath, content, 'utf8')
+      copied++
+    }
+
+    return { ok: true, copied, skipped }
+  } catch (e) {
+    return { error: e.message }
+  }
+}
+
+module.exports = { parseAgentFile, create, createBoilerplate, list, getById, usageCount, updateReviewTarget, updateLoopConfig, updateRole, copyBundledAgentsToLibrary }

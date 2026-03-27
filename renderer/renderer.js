@@ -66,26 +66,41 @@ const NP_STEP_SUBTITLES = [
 document.addEventListener('DOMContentLoaded', async () => {
   wireEventListeners()
   wireNewProjectDialog()
-  await loadInitialData()
   setupIPCListeners()
+  // Load initial data asynchronously to avoid blocking UI
+  loadInitialData().catch((e) => {
+    appendLogLine('Failed to load initial data: ' + e.message, 'error')
+  })
 })
 
 async function loadInitialData() {
   try {
-    const [agentResult, projects, onboardingResult] = await Promise.all([
-      window.api.listAgents(),
-      window.api.listProjects(),
-      window.api.checkOnboarding(),
-    ])
-    state.agents = agentResult?.agents || []
-    state.agentLoadErrors = agentResult?.errors || []
-    state.projects = projects || []
-    updateStatusBar()
-
+    // Load onboarding status first (fast, single file read)
+    const onboardingResult = await window.api.checkOnboarding()
+    
     // Show onboarding dialog if not completed
     if (!onboardingResult?.completed) {
       showOnboardingDialog()
+      return // Don't load other data until onboarding is done
     }
+
+    // Load agents and projects in parallel but don't block UI
+    // Update UI as each completes
+    window.api.listAgents().then((agentResult) => {
+      state.agents = agentResult?.agents || []
+      state.agentLoadErrors = agentResult?.errors || []
+      renderLibraryAgents()
+      updateStatusBar()
+    }).catch((e) => {
+      appendLogLine('Failed to load agents: ' + e.message, 'error')
+    })
+
+    window.api.listProjects().then((projects) => {
+      state.projects = projects || []
+      updateStatusBar()
+    }).catch((e) => {
+      appendLogLine('Failed to load projects: ' + e.message, 'error')
+    })
   } catch (e) {
     appendLogLine('Failed to load initial data: ' + e.message, 'error')
   }
@@ -184,6 +199,8 @@ function wireEventListeners() {
   document.getElementById('btn-start').addEventListener('click', handleStart)
   document.getElementById('btn-pause').addEventListener('click', togglePause)
   document.getElementById('btn-abort').addEventListener('click', handleAbort)
+  document.getElementById('btn-resume').addEventListener('click', handleResume)
+  document.getElementById('btn-retry').addEventListener('click', handleRetry)
 
   // Activity log
   document.getElementById('btn-clear-log').addEventListener('click', clearLog)
@@ -535,6 +552,25 @@ async function setupOnboardingDialog() {
   document.getElementById('btn-onboarding-authenticate').addEventListener('click', () => {
     openSettingsDialog()
     onboardingSettingsDialogOpen = true
+  })
+
+  // Copy agents to library button
+  document.getElementById('btn-onboarding-copy-agents').addEventListener('click', async () => {
+    try {
+      const result = await window.api.copyAgentsToLibrary()
+      if (result.error) {
+        appendLogLine('Failed to copy agents: ' + result.error, 'error')
+      } else {
+        appendLogLine('Agents copied to library successfully', 'ok')
+        const btn = document.getElementById('btn-onboarding-copy-agents')
+        if (btn) {
+          btn.disabled = true
+          btn.textContent = 'Agents copied!'
+        }
+      }
+    } catch (e) {
+      appendLogLine('Failed to copy agents: ' + e.message, 'error')
+    }
   })
 
   // Finish button
@@ -1378,6 +1414,19 @@ function handlePipelineStatus(data) {
     btnStart.disabled = (state.pipelineState === 'running')
   }
 
+  // Show/hide Resume and Retry buttons based on error state
+  const btnResume = document.getElementById('btn-resume')
+  const btnRetry = document.getElementById('btn-retry')
+  const isError = state.pipelineState === 'error'
+  if (btnResume) {
+    btnResume.classList.toggle('hidden', !isError)
+    btnResume.disabled = !isError
+  }
+  if (btnRetry) {
+    btnRetry.classList.toggle('hidden', !isError)
+    btnRetry.disabled = !isError
+  }
+
   updateTitlebarStatus()
   updateStatusBar()
   updatePipelineProgress()
@@ -1759,16 +1808,23 @@ function handleQwenNotFound(data) {
         if (saveResult.error) {
           appendLogLine('Failed to save Qwen path: ' + saveResult.error, 'error')
           hideDialog('dialog-qwen-not-found')
-          if (qwenResponseCallback) {
+          if (qwenNotFoundInOnboarding) {
+            qwenNotFoundInOnboarding = false
+            showOnboardingStep(1)
+          } else if (qwenResponseCallback) {
             qwenResponseCallback({ action: 'cancel' })
             qwenResponseCallback = null
           }
           return
         }
-        
-        // Path saved - notify main process to continue
+
+        // Path saved - notify main process to continue or re-verify in onboarding
         hideDialog('dialog-qwen-not-found')
-        if (qwenResponseCallback) {
+        if (qwenNotFoundInOnboarding) {
+          // Onboarding flow - re-verify Qwen installation
+          qwenNotFoundInOnboarding = false
+          await verifyQwenInstallation()
+        } else if (qwenResponseCallback) {
           qwenResponseCallback({ action: 'browse', path: selectedPath })
           qwenResponseCallback = null
         }
@@ -1779,7 +1835,10 @@ function handleQwenNotFound(data) {
     } catch (e) {
       appendLogLine('Failed to browse for Qwen installation: ' + e.message, 'error')
       hideDialog('dialog-qwen-not-found')
-      if (qwenResponseCallback) {
+      if (qwenNotFoundInOnboarding) {
+        qwenNotFoundInOnboarding = false
+        showOnboardingStep(1)
+      } else if (qwenResponseCallback) {
         qwenResponseCallback({ action: 'cancel' })
         qwenResponseCallback = null
       }
@@ -2099,6 +2158,13 @@ function setPipelineControlsDisabled(disabled) {
 
 function renderLibraryAgents() {
   const list = document.getElementById('library-agents-list')
+  const loadingIndicator = document.getElementById('library-loading')
+  
+  // Hide loading indicator
+  if (loadingIndicator) {
+    loadingIndicator.style.display = 'none'
+  }
+  
   list.innerHTML = ''
 
   const pipelineAgentIds = new Set(state.pipelineSteps.map(s => s.agent_id))
@@ -2821,6 +2887,86 @@ async function handleAbort() {
   }, 3000)
 }
 
+async function handleResume() {
+  if (!state.currentProject) {
+    appendLogLine('No project open', 'warn')
+    return
+  }
+
+  // Resume = skip the current failed agent and continue to the next
+  const currentStepIndex = state.currentStepIndex
+  if (currentStepIndex < 0 || currentStepIndex >= state.pipelineSteps.length) {
+    appendLogLine('No failed agent to resume from', 'warn')
+    return
+  }
+
+  // Verify the current step has ERROR status
+  const currentStep = state.pipelineSteps[currentStepIndex]
+  if (currentStep.status !== 'error') {
+    appendLogLine('Cannot resume: current step is not in error status', 'warn')
+    return
+  }
+
+  try {
+    // Skip the current failed agent
+    const skipResult = await window.api.skipAgent(currentStepIndex, state.currentProject.projectPath)
+    if (skipResult.error) {
+      appendLogLine('Failed to skip agent: ' + skipResult.error, 'error')
+      return
+    }
+    appendLogLine(`Skipped ${currentStep.agent_name}, resuming from next agent`, 'info')
+
+    // Start pipeline from the next step
+    const nextStepIndex = currentStepIndex + 1
+    if (nextStepIndex >= state.pipelineSteps.length) {
+      appendLogLine('No more agents to run after skipping', 'warn')
+      state.pipelineState = 'complete'
+      updateTitlebarStatus()
+      return
+    }
+
+    await startPipeline(nextStepIndex)
+  } catch (e) {
+    appendLogLine('Failed to resume: ' + e.message, 'error')
+  }
+}
+
+async function handleRetry() {
+  if (!state.currentProject) {
+    appendLogLine('No project open', 'warn')
+    return
+  }
+
+  // Retry = re-run the current failed agent with its existing context
+  const currentStepIndex = state.currentStepIndex
+  if (currentStepIndex < 0 || currentStepIndex >= state.pipelineSteps.length) {
+    appendLogLine('No failed agent to retry', 'warn')
+    return
+  }
+
+  // Verify the current step has ERROR status
+  const currentStep = state.pipelineSteps[currentStepIndex]
+  if (currentStep.status !== 'error') {
+    appendLogLine('Cannot retry: current step is not in error status', 'warn')
+    return
+  }
+
+  try {
+    // Reset the failed agent status to IDLE
+    const retryResult = await window.api.retryAgent(currentStepIndex, state.currentProject.projectPath)
+    if (retryResult.error) {
+      appendLogLine('Failed to retry agent: ' + retryResult.error, 'error')
+      return
+    }
+    appendLogLine(`Retrying ${currentStep.agent_name}`, 'info')
+
+    // Start pipeline from the current step
+    await startPipeline(currentStepIndex)
+  } catch (e) {
+    appendLogLine('Failed to retry: ' + e.message, 'error')
+  }
+}
+
 async function handleContinue() {
   try {
     await window.api.resumePipeline()
@@ -3089,11 +3235,7 @@ async function openProjectDialog() {
 
 async function loadProject(projectPath) {
   try {
-    // Refresh agents list first to ensure we have latest data
-    const agentResult = await window.api.listAgents()
-    state.agents = agentResult?.agents || []
-    state.agentLoadErrors = agentResult?.errors || []
-
+    // Open project first to show project name immediately
     const result = await window.api.openProject(projectPath)
     if (result.error) {
       appendLogLine('Failed to load project: ' + result.error, 'error')
@@ -3106,42 +3248,54 @@ async function loadProject(projectPath) {
     // Update window title to show "Jarvix -- Project Name"
     document.title = `Jarvix -- ${result.projectJson.name}`
 
-    // Load pipeline steps with agent names
-    state.pipelineSteps = (result.pipelineJson.steps || []).map(step => ({
-      ...step,
-      agent_name: state.agents.find(a => a.id === step.agent_id)?.name || 'Unknown',
-    }))
+    // Load agents asynchronously, then render pipeline
+    window.api.listAgents().then((agentResult) => {
+      state.agents = agentResult?.agents || []
+      state.agentLoadErrors = agentResult?.errors || []
+      
+      // Load pipeline steps with agent names
+      state.pipelineSteps = (result.pipelineJson.steps || []).map(step => ({
+        ...step,
+        agent_name: state.agents.find(a => a.id === step.agent_id)?.name || 'Unknown',
+      }))
 
-    // Migrate review_target and loop from agents to steps if missing
-    // This handles projects where reviewer targets were assigned before the fix
-    state.pipelineSteps.forEach(step => {
-      const agent = state.agents.find(a => a.id === step.agent_id)
-      if (agent) {
-        // Migrate review_target if step doesn't have it but agent does
-        if (!step.review_target && agent.review_target) {
-          step.review_target = agent.review_target
+      // Migrate review_target and loop from agents to steps if missing
+      state.pipelineSteps.forEach(step => {
+        const agent = state.agents.find(a => a.id === step.agent_id)
+        if (agent) {
+          if (!step.review_target && agent.review_target) {
+            step.review_target = agent.review_target
+          }
+          if (!step.loop && agent.loop && agent.loop.type) {
+            step.loop = { ...agent.loop }
+          }
         }
-        // Migrate loop config if step doesn't have it but agent does
-        if (!step.loop && agent.loop && agent.loop.type) {
-          step.loop = { ...agent.loop }
-        }
-      }
+      })
+
+      state.currentStepIndex = -1
+      state.maxStepReached = -1
+      state.pipelineState = 'idle'
+      state.selectedNodeIndex = -1
+      state.selectedAgentId = null
+      state.revisionLoopCounts = {}
+
+      renderPipelineAgents()
+      renderLibraryAgents()
+      renderPipelineCanvas()
+      updateDetailPanel()
+      updateAgentControls()
+      updateTitlebarStatus()
+      updateStatusBar()
+    }).catch((e) => {
+      appendLogLine('Failed to load agents: ' + e.message, 'error')
+      // Still render pipeline without agent names
+      state.pipelineSteps = (result.pipelineJson.steps || []).map(step => ({
+        ...step,
+        agent_name: 'Unknown',
+      }))
+      renderPipelineCanvas()
+      updateStatusBar()
     })
-
-    state.currentStepIndex = -1
-    state.maxStepReached = -1
-    state.pipelineState = 'idle'
-    state.selectedNodeIndex = -1
-    state.selectedAgentId = null
-    state.revisionLoopCounts = {}
-
-    renderPipelineAgents()
-    renderLibraryAgents()
-    renderPipelineCanvas()
-    updateDetailPanel()
-    updateAgentControls()
-    updateTitlebarStatus()
-    updateStatusBar()
   } catch (e) {
     appendLogLine('Failed to load project: ' + e.message, 'error')
   }

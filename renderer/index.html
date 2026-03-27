@@ -44,16 +44,24 @@
 
       <div class="tb-controls">
         <div class="tb-pill idle" id="status-pill">Idle</div>
-        <button class="tb-btn start" id="btn-start" data-tip="Start Pipeline" title="" aria-label="Start Pipeline">
+        <button class="tb-btn start" id="btn-start" data-tip="Restart Pipeline: Start the pipeline from the beginning, re-running all agents" title="" aria-label="Restart Pipeline">
           ▶ Start
+        </button>
+        <button class="tb-btn resume hidden" id="btn-resume" data-tip="Resume: Skip the failed agent and continue with the next agent" title="" aria-label="Resume Pipeline">
+          ⏭ Resume
+        </button>
+        <button class="tb-btn retry hidden" id="btn-retry" data-tip="Retry: Re-run the failed agent with its existing context intact" title="" aria-label="Retry Agent">
+          ↻ Retry
         </button>
         <button class="tb-btn pause" id="btn-pause" data-tip="Pause" title="" aria-label="Pause">
           <span id="pause-icon">⏸</span>
         </button>
-        <button class="tb-btn abort" id="btn-abort" data-tip="Abort" title="" aria-label="Abort">
+        <button class="tb-btn abort" id="btn-abort" data-tip="Stop: Immediately stop the pipeline and abort the current agent" title="" aria-label="Stop Pipeline">
           ■
         </button>
       </div>
+
+      <div class="tb-project-name" id="tb-project-name">No project</div>
 
       <div style="flex:1;-webkit-app-region:drag;"></div>
 
@@ -86,7 +94,9 @@
               <button class="refresh-btn" id="btn-refresh-agents" title="Refresh agents list">⟳</button>
             </div>
           </div>
-          <div id="library-agents-list"></div>
+          <div id="library-agents-list">
+            <div class="loading-indicator" id="library-loading">Loading agents...</div>
+          </div>
         </div>
       </div>
 
@@ -329,15 +339,19 @@
             Great, now that you've finished the setup, you can create a new project. One last thing before we let you go.
           </p>
           <p class="onboarding-text">
-            Jarvix uses what we call agents. Each agent is a Qwen instance that is running under the hood. 
-            Each agent has a persona or a role that it plays in the pipeline (the development process of your project). 
-            These agents are defined as <code>.md</code> files. You can modify them any time by editing the files in:
+            Jarvix uses what we call agents. Each agent is a Qwen instance that is running under the hood. Each agent has a persona or a role that it plays in the
+            pipeline (the development process of your project). These agents are defined as <code>.md</code> files. You can modify them any time by editing the files in:
           </p>
           <div class="onboarding-path" id="onboarding-agents-path"></div>
           <p class="onboarding-text">
-            Jarvix ships with some ready made agents that we believe work well with most software development pipelines. 
-            Feel free to read them, edit or create new ones.
+            Jarvix ships with some ready made agents that we believe work well with most software development pipelines. You can choose to add them to your list of agents or not. You can do that by clicking the button below.
           </p>
+          <p class="onboarding-text">
+            That said, feel free to read them, edit or create new ones.
+          </p>
+          <div class="onboarding-actions" style="margin-top:16px;">
+            <button class="footer-btn" id="btn-onboarding-copy-agents">Copy agents to library</button>
+          </div>
         </div>
       </div>
 

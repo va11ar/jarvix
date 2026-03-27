@@ -1,4 +1,4 @@
-const { ipcMain, dialog, shell, app } = require('electron')
+const { ipcMain, dialog, shell, app, BrowserWindow } = require('electron')
 const fs = require('fs/promises')
 const path = require('path')
 const ProjectManager = require('./project/ProjectManager')
@@ -36,6 +36,16 @@ function registerIpcHandlers(win) {
   ipcMain.handle(CONSTANTS.IPC.AGENTS_LIST,       h(() => AgentLibrary.list()))
   ipcMain.handle(CONSTANTS.IPC.AGENTS_GET,        h((agentId) => AgentLibrary.getById(agentId)))
   ipcMain.handle(CONSTANTS.IPC.AGENTS_CREATE,     h((definition) => AgentLibrary.create(definition)))
+  ipcMain.handle(CONSTANTS.IPC.AGENTS_CREATE_BOILERPLATE, h(async (args) => {
+    const result = await AgentLibrary.createBoilerplate(args || {})
+    if (result.error) return result
+    // Open the editor for the newly created agent
+    const win = BrowserWindow.getFocusedWindow()
+    if (win) {
+      await AgentEditor.open(result.id, win)
+    }
+    return { ok: true, agentId: result.id }
+  }))
   ipcMain.handle(CONSTANTS.IPC.AGENTS_USAGE_COUNT, h((agentId) => AgentLibrary.usageCount(agentId)))
   ipcMain.handle(CONSTANTS.IPC.AGENTS_UPDATE_REVIEW_TARGET, h(({ agentId, reviewTargetId }) => AgentLibrary.updateReviewTarget(agentId, reviewTargetId)))
   ipcMain.handle(CONSTANTS.IPC.AGENTS_UPDATE_LOOP_CONFIG, h(({ agentId, loopType, maxRevisionLoops }) => AgentLibrary.updateLoopConfig(agentId, loopType, maxRevisionLoops)))
@@ -59,6 +69,16 @@ function registerIpcHandlers(win) {
     return { path: agentsDir }
   }))
 
+  ipcMain.handle(CONSTANTS.IPC.AGENTS_COPY_TO_LIBRARY, h(async () => {
+    const AgentLibrary = require('./project/AgentLibrary')
+    try {
+      await AgentLibrary.copyBundledAgentsToLibrary()
+      return { ok: true }
+    } catch (e) {
+      return { error: e.message }
+    }
+  }))
+
 
   // ── Pipeline ─────────────────────────────────────────────────────────────
   ipcMain.handle('pipeline:start', h((args) => PipelineRunner.start(args.projectPath, args.resumeFrom, win)))
@@ -68,6 +88,7 @@ function registerIpcHandlers(win) {
   ipcMain.handle('pipeline:update-steps', h(({ steps, projectPath }) => PipelineRunner.updateSteps(steps, projectPath)))
   ipcMain.handle('pipeline:skip-agent',   h(({ stepIndex, projectPath }) => PipelineRunner.skipAgent(stepIndex, projectPath)))
   ipcMain.handle('pipeline:unskip-agent', h(({ stepIndex, projectPath }) => PipelineRunner.unskipAgent(stepIndex, projectPath)))
+  ipcMain.handle('pipeline:retry-agent',  h(({ stepIndex, projectPath }) => PipelineRunner.retryAgent(stepIndex, projectPath)))
   ipcMain.handle('agent:kill',            h(() => PipelineRunner.killCurrent()))
   ipcMain.handle('pipeline:has-run-before', h(({ projectPath }) => PipelineRunner.hasRunBefore(projectPath)))
   ipcMain.handle('pipeline:reset',        h(({ projectPath }) => PipelineRunner.reset(projectPath)))
@@ -86,17 +107,19 @@ function registerIpcHandlers(win) {
   ipcMain.handle(CONSTANTS.IPC.CONTEXT_OPEN_OUTPUT,       h((args) => ContextManager.openOutput(args)))
   ipcMain.handle(CONSTANTS.IPC.CONTEXT_OPEN_AGENT_FILE,   h((args) => ContextManager.openAgentFile(args)))
   ipcMain.handle(CONSTANTS.IPC.CONTEXT_OPEN_BRIEF,        h((args) => ContextManager.openBrief(args)))
-  ipcMain.handle(CONSTANTS.IPC.CONTEXT_OPEN_AGENTS_FOLDER, h(async () => {
-    const Settings = require('./settings')
-    const fs = require('fs/promises')
-    const settings = await Settings.load()
-    // Use same path logic as AgentLibrary.getAgentsDir()
-    const agentsFolder = settings.agentsDir || path.join(app.getPath('userData'), 'Agents')
-    // Create the folder if it doesn't exist
-    await fs.mkdir(agentsFolder, { recursive: true })
-    await shell.openPath(agentsFolder)
-    return { ok: true }
-  }))
+  ipcMain.handle(CONSTANTS.IPC.CONTEXT_OPEN_AGENTS_FOLDER, async () => {
+    try {
+      const Settings = require('./settings')
+      const fs = require('fs/promises')
+      const settings = await Settings.load()
+      const agentsFolder = settings.agentsDir || path.join(app.getPath('userData'), 'Agents')
+      await fs.mkdir(agentsFolder, { recursive: true })
+      await shell.openPath(agentsFolder)
+      return { ok: true }
+    } catch (e) {
+      return { error: e.message }
+    }
+  })
 
   // ── Window ───────────────────────────────────────────────────────────────
   ipcMain.on(CONSTANTS.IPC.SHOW_PREFERENCES_COMING_SOON, h(async () => {
