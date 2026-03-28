@@ -558,10 +558,15 @@ async function setupOnboardingDialog() {
   document.getElementById('btn-onboarding-copy-agents').addEventListener('click', async () => {
     try {
       const result = await window.api.copyAgentsToLibrary()
+      console.log('[renderer] copyAgentsToLibrary result:', result)
       if (result.error) {
         appendLogLine('Failed to copy agents: ' + result.error, 'error')
       } else {
-        appendLogLine('Agents copied to library successfully', 'ok')
+        const copied = result.copied || 0
+        const skipped = result.skipped || 0
+        const agentsPath = await window.api.getAgentsDirPath()
+        appendLogLine('Agents copied to library: ' + copied + ' copied, ' + skipped + ' skipped', 'ok')
+        appendLogLine('Agents location: ' + agentsPath.path, 'info')
         const btn = document.getElementById('btn-onboarding-copy-agents')
         if (btn) {
           btn.disabled = true
@@ -639,6 +644,12 @@ async function completeOnboarding() {
     await window.api.markOnboardingDone()
     hideDialog('dialog-onboarding')
     appendLogLine('Onboarding completed. Welcome to Jarvix!', 'ok')
+    // Load agents and projects now that onboarding is done
+    const agentResult = await window.api.listAgents()
+    state.agents = agentResult?.agents || []
+    state.agentLoadErrors = agentResult?.errors || []
+    renderLibraryAgents()
+    updateStatusBar()
   } catch (e) {
     appendLogLine('Failed to complete onboarding: ' + e.message, 'error')
   }

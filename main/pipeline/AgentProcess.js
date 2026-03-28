@@ -109,18 +109,22 @@ class AgentProcess extends EventEmitter {
       if (this.agent.role === 'producer') {
         const outputFolderPrompt = `\n\nOUTPUT FOLDER INSTRUCTIONS:
 All artifacts you create (code files, articles, images, or any other deliverables)
-must be written to the Output/ folder in the project root. Do not write artifacts
-to the project root or Context/ folder.
+must be written to the Output/ subdirectory. For example:
+- Correct: Output/my-code.js, Output/article.md, Output/screenshot.png
+- Wrong: my-code.js (project root), Context/my-code.js
+
+Do NOT write artifacts to the project root directory. Do NOT write artifacts to
+the Context/ folder.
 
 When you need to read existing artifacts to iterate on feedback, read them from
-the Output/ folder.
+the Output/ subdirectory.
 
 Your progress tracking file (Context/${outputFileName}) stays in the Context/ folder —
 only user-facing artifacts go to Output/.`
         promptParts.push(outputFolderPrompt)
       } else if (this.agent.role === 'producer-reviewer') {
         const reviewerPrompt = `\n\nREVIEWER ARTIFACT LOCATION:
-When reviewing the producer's work, read all artifacts from the Output/ folder.
+When reviewing the producer's work, read all artifacts from the Output/ subdirectory.
 Do not read artifacts from the project root or Context/ folder — only Output/
 contains the producer's deliverables.
 
@@ -135,7 +139,7 @@ tracking purposes — do not review this file as an artifact.`
       // Append the injected footer
       // Output path is relative to Qwen's cwd (projectPath), so just Context/filename
       const outputRelativePath = `Context/${outputFileName}`
-      const footerPrompt = `\n\nYou must write your progress tracking file to \`${outputRelativePath}\`. Use your file writing tools to do this — do not print your output to the terminal.\n\nAll other artifacts you create (images, text files, binaries, or any other deliverables) must be written to the Output/ folder as specified above.\n\nThe very last line of the file you write must be exactly one of:\n\n\`PIPELINE_STATUS: DONE | ISSUES: false\` — task complete, no issues found\n\n\`PIPELINE_STATUS: DONE | ISSUES: true\` — task complete, issues found (review agents only)\n\n\`PIPELINE_STATUS: ERROR | REASON: <brief description>\` — task could not be completed\n\nDo not omit this line. Do not paraphrase it. Do not add anything after it.`
+      const footerPrompt = `\n\nYou must write your progress tracking file to \`${outputRelativePath}\`. Use your file writing tools to do this — do not print your output to the terminal.\n\nAll other artifacts you create (images, text files, binaries, or any other deliverables) must be written to the Output/ subdirectory as specified above.\n\nThe very last line of the file you write must be exactly one of:\n\n\`PIPELINE_STATUS: DONE | ISSUES: false\` — task complete, no issues found\n\n\`PIPELINE_STATUS: DONE | ISSUES: true\` — task complete, issues found (review agents only)\n\n\`PIPELINE_STATUS: ERROR | REASON: <brief description>\` — task could not be completed\n\nDo not omit this line. Do not paraphrase it. Do not add anything after it.`
       promptParts.push(footerPrompt)
 
       const fullPrompt = promptParts.join('')
@@ -848,18 +852,22 @@ Do not write anything else to \`Context/qa.md\`. Do not write the report to \`Co
       } else if (this.agent.role === 'producer') {
         const outputFolderPrompt = `\n\nOUTPUT FOLDER INSTRUCTIONS:
 All artifacts you create (code files, articles, images, or any other deliverables)
-must be written to the Output/ folder in the project root. Do not write artifacts
-to the project root or Context/ folder.
+must be written to the Output/ subdirectory. For example:
+- Correct: Output/my-code.js, Output/article.md, Output/screenshot.png
+- Wrong: my-code.js (project root), Context/my-code.js
+
+Do NOT write artifacts to the project root directory. Do NOT write artifacts to
+the Context/ folder.
 
 When you need to read existing artifacts to iterate on feedback, read them from
-the Output/ folder.
+the Output/ subdirectory.
 
 Your progress tracking file (Context/${outputFileName}) stays in the Context/ folder —
 only user-facing artifacts go to Output/.`
         promptParts.push(outputFolderPrompt)
       } else if (this.agent.role === 'producer-reviewer') {
         const reviewerPrompt = `\n\nREVIEWER ARTIFACT LOCATION:
-When reviewing the producer's work, read all artifacts from the Output/ folder.
+When reviewing the producer's work, read all artifacts from the Output/ subdirectory.
 Do not read artifacts from the project root or Context/ folder — only Output/
 contains the producer's deliverables.
 
@@ -872,7 +880,7 @@ tracking purposes — do not review this file as an artifact.`
       } else {
         // Default footer for other agents
         const outputRelativePath = `Context/${outputFileName}`
-        const footerPrompt = `\n\nYou must write your progress tracking file to \`${outputRelativePath}\`. Use your file writing tools to do this — do not print your output to the terminal.\n\nAll other artifacts you create (images, text files, binaries, or any other deliverables) must be written to the Output/ folder as specified above.\n\nThe very last line of the file you write must be exactly one of:\n\n\`PIPELINE_STATUS: DONE | ISSUES: false\` — task complete, no issues found\n\n\`PIPELINE_STATUS: DONE | ISSUES: true\` — task complete, issues found (review agents only)\n\n\`PIPELINE_STATUS: ERROR | REASON: <brief description>\` — task could not be completed\n\nDo not omit this line. Do not paraphrase it. Do not add anything after it.`
+        const footerPrompt = `\n\nYou must write your progress tracking file to \`${outputRelativePath}\`. Use your file writing tools to do this — do not print your output to the terminal.\n\nAll other artifacts you create (images, text files, binaries, or any other deliverables) must be written to the Output/ subdirectory as specified above.\n\nThe very last line of the file you write must be exactly one of:\n\n\`PIPELINE_STATUS: DONE | ISSUES: false\` — task complete, no issues found\n\n\`PIPELINE_STATUS: DONE | ISSUES: true\` — task complete, issues found (review agents only)\n\n\`PIPELINE_STATUS: ERROR | REASON: <brief description>\` — task could not be completed\n\nDo not omit this line. Do not paraphrase it. Do not add anything after it.`
         promptParts.push(footerPrompt)
       }
 

@@ -21,7 +21,9 @@ function isValidUuid(str) {
 async function getAgentsDir() {
   const Settings = require('../settings')
   const settings = await Settings.load()
-  return settings.agentsDir || path.join(app.getPath('userData'), 'Agents')
+  const agentsDir = settings.agentsDir || path.join(app.getPath('userData'), 'Agents')
+  console.log('[AgentLibrary] getAgentsDir() returning:', agentsDir, 'settings.agentsDir:', settings.agentsDir, 'app.getPath(userData):', app.getPath('userData'))
+  return agentsDir
 }
 
 /**
@@ -508,6 +510,8 @@ async function copyBundledAgentsToLibrary() {
     const fsSync = require('fs')
     const userAgentsDir = await getAgentsDir()
 
+    console.log('[AgentLibrary] copyBundledAgentsToLibrary - userAgentsDir:', userAgentsDir)
+
     // Ensure user agents directory exists
     await fs.mkdir(userAgentsDir, { recursive: true })
 
@@ -515,14 +519,20 @@ async function copyBundledAgentsToLibrary() {
     // In development: app.getAppPath() returns the project root
     // In production: agent-samples should be copied to app resources
     let bundledAgentsDir = path.join(app.getAppPath(), 'agent-samples')
-    
+
+    console.log('[AgentLibrary] bundledAgentsDir (dev path):', bundledAgentsDir)
+    console.log('[AgentLibrary] app.getAppPath():', app.getAppPath())
+    console.log('[AgentLibrary] process.resourcesPath:', process.resourcesPath)
+
     // If not found, try the resources/app path (for packaged app)
     if (!fsSync.existsSync(bundledAgentsDir)) {
       bundledAgentsDir = path.join(process.resourcesPath, 'app', 'agent-samples')
+      console.log('[AgentLibrary] bundledAgentsDir (prod path):', bundledAgentsDir)
     }
 
     // Check if bundled agents directory exists
     if (!fsSync.existsSync(bundledAgentsDir)) {
+      console.error('[AgentLibrary] Bundled agents directory not found:', bundledAgentsDir)
       return { error: 'Bundled agents directory not found' }
     }
 
@@ -530,9 +540,14 @@ async function copyBundledAgentsToLibrary() {
     const bundledFiles = await fs.readdir(bundledAgentsDir)
     const agentFiles = bundledFiles.filter(f => f.endsWith('.md'))
 
+    console.log('[AgentLibrary] Found bundled agent files:', agentFiles)
+
     // Get list of existing user agents (by name)
-    const existingAgents = await list()
+    const existingAgentsResult = await list()
+    const existingAgents = existingAgentsResult.agents || []
     const existingNames = new Set(existingAgents.map(a => a.name.toLowerCase()))
+
+    console.log('[AgentLibrary] Existing agent names:', [...existingNames])
 
     let copied = 0
     let skipped = 0
@@ -544,18 +559,25 @@ async function copyBundledAgentsToLibrary() {
       // Skip if agent with same name already exists
       const agentName = path.basename(file, '.md')
       if (existingNames.has(agentName.toLowerCase())) {
+        console.log('[AgentLibrary] Skipping existing agent:', agentName)
         skipped++
         continue
       }
 
+      console.log('[AgentLibrary] Copying agent:', agentName, 'from', bundledPath, 'to', userPath)
+      console.log('[AgentLibrary] bundledPath exists:', fsSync.existsSync(bundledPath))
       // Copy the file
       const content = await fs.readFile(bundledPath, 'utf8')
       await fs.writeFile(userPath, content, 'utf8')
+      console.log('[AgentLibrary] File written, verifying:', fsSync.existsSync(userPath))
       copied++
+      console.log('[AgentLibrary] Copied agent:', agentName)
     }
 
+    console.log('[AgentLibrary] Copy complete - copied:', copied, 'skipped:', skipped)
     return { ok: true, copied, skipped }
   } catch (e) {
+    console.error('[AgentLibrary] copyBundledAgentsToLibrary error:', e)
     return { error: e.message }
   }
 }

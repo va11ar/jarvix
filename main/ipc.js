@@ -71,12 +71,9 @@ function registerIpcHandlers(win) {
 
   ipcMain.handle(CONSTANTS.IPC.AGENTS_COPY_TO_LIBRARY, h(async () => {
     const AgentLibrary = require('./project/AgentLibrary')
-    try {
-      await AgentLibrary.copyBundledAgentsToLibrary()
-      return { ok: true }
-    } catch (e) {
-      return { error: e.message }
-    }
+    const result = await AgentLibrary.copyBundledAgentsToLibrary()
+    console.log('[ipc] copyBundledAgentsToLibrary result:', result)
+    return result
   }))
 
 
