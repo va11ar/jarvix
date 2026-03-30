@@ -7,10 +7,10 @@ module.exports = {
       /^\/\.qwen/,
     ],
     win32metadata: {
-      CompanyName: 'JARVIX',
+      CompanyName: 'WAZEAR',
       FileDescription: 'Desktop application that orchestrates a pipeline of Qwen Code CLI agents',
-      ProductName: 'JARVIX',
-      InternalName: 'JARVIX',
+      ProductName: 'WAZEAR',
+      InternalName: 'WAZEAR',
     },
   },
   rebuildConfig: {},

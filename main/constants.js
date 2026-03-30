@@ -170,6 +170,20 @@ const HARDCODED_EXCLUDE = [
   'run_shell_command(:(){ :|:& };:)',
 ]
 
+// Pipe-to-shell patterns — commands matching these are dropped before the user
+// approval display. The individual tools (curl, wget) are not blocked; only
+// patterns that pipe remote content directly into a shell interpreter are caught.
+const PIPE_TO_SHELL_PATTERNS = [
+  /\|\s*(ba)?sh\b/,
+  /\|\s*zsh\b/,
+  /\|\s*fish\b/,
+  /\|\s*python[23]?\s+-/,
+  /\|\s*node\s+-/,
+  /\beval\s+/,
+  /\$\(curl\b/,
+  /\$\(wget\b/,
+]
+
 // Stack defaults for command whitelist generation
 const STACK_DEFAULTS = {
   // Common commands included for all projects
@@ -262,5 +276,6 @@ module.exports = {
   AGENT_ROLES,
   IPC,
   HARDCODED_EXCLUDE,
+  PIPE_TO_SHELL_PATTERNS,
   STACK_DEFAULTS,
 }

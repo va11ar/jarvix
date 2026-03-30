@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════════════
-// JARVIX Renderer — All UI logic, state object, IPC event handlers
+// WAZEAR Renderer — All UI logic, state object, IPC event handlers
 // ═══════════════════════════════════════════════════════════════════════════
 
 'use strict'
@@ -643,7 +643,7 @@ async function completeOnboarding() {
   try {
     await window.api.markOnboardingDone()
     hideDialog('dialog-onboarding')
-    appendLogLine('Onboarding completed. Welcome to Jarvix!', 'ok')
+    appendLogLine('Onboarding completed. Welcome to Wazear!', 'ok')
     // Load agents and projects now that onboarding is done
     const agentResult = await window.api.listAgents()
     state.agents = agentResult?.agents || []
@@ -1540,7 +1540,7 @@ function renderPreflightChoice(body, footer, title) {
       on your file system.
     </p>
     <p style="color:var(--text-dim);line-height:1.6;margin-bottom:16px;">
-      Jarvix can scan your project documents and infer which commands this agent will likely need.
+      Wazear can scan your project documents and infer which commands this agent will likely need.
       You can then review and approve them.
     </p>
     <p style="color:var(--text-dim);line-height:1.6;">
@@ -1671,9 +1671,16 @@ function renderPreflightApproveList(body, footer, title) {
     return
   }
 
-  const commandListHtml = state.preflightDelta.map(cmd =>
-    `<div class="command-row-readonly">${escapeHtml(cmd)}</div>`
-  ).join('')
+  const commandListHtml = state.preflightDelta.map(item => {
+    // Handle both new {command, reason} format and legacy plain strings gracefully
+    const cmd = typeof item === 'string' ? item : item.command
+    const reason = typeof item === 'string' ? '' : (item.reason || '')
+    return `
+      <div class="command-row-readonly">
+        <span class="command-text">${escapeHtml(cmd)}</span>
+        ${reason ? `<span class="command-reason">${escapeHtml(reason)}</span>` : ''}
+      </div>`
+  }).join('')
 
   body.innerHTML = `
     <div style="margin-bottom:16px;">
@@ -3256,8 +3263,8 @@ async function loadProject(projectPath) {
     state.currentProject = result
     document.getElementById('tb-project-name').textContent = result.projectJson.name
 
-    // Update window title to show "Jarvix -- Project Name"
-    document.title = `Jarvix -- ${result.projectJson.name}`
+    // Update window title to show "Wazear -- Project Name"
+    document.title = `Wazear -- ${result.projectJson.name}`
 
     // Load agents asynchronously, then render pipeline
     window.api.listAgents().then((agentResult) => {
@@ -3556,7 +3563,7 @@ function npRenderAgentPicker(agents, errors = []) {
     warningDiv.className = 'agent-load-warning'
     warningDiv.innerHTML = `
       <div class="warning-icon">⚠</div>
-      <div class="warning-text">Could not display some agent files due to permission issues, Jarvix lacks the correct permissions to access them</div>
+      <div class="warning-text">Could not display some agent files due to permission issues, Wazear lacks the correct permissions to access them</div>
     `
     list.appendChild(warningDiv)
   }
@@ -3728,7 +3735,7 @@ async function openAddAgentDialog() {
       warningDiv.className = 'agent-load-warning'
       warningDiv.innerHTML = `
         <div class="warning-icon">⚠</div>
-        <div class="warning-text">Could not display some agent files due to permission issues, Jarvix lacks the correct permissions to access them</div>
+        <div class="warning-text">Could not display some agent files due to permission issues, Wazear lacks the correct permissions to access them</div>
       `
       list.appendChild(warningDiv)
     }

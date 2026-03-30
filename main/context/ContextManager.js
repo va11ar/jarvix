@@ -12,6 +12,27 @@ function assertProjectPath(filePath, projectPath) {
   }
 }
 
+// Retry logic for transient file locks — retries up to 3 times with 200ms delay
+async function retryOpenPath(filePath, attempts = 3) {
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await shell.openPath(filePath)
+    } catch (e) {
+      if (i === attempts - 1) throw e
+      await new Promise(r => setTimeout(r, 200))
+    }
+  }
+}
+
+// Timeout wrapper — rejects with file path if operation doesn't complete in time
+const withTimeout = (promise, ms, filePath) =>
+  Promise.race([
+    promise,
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error(`File operation timed out after ${ms}ms: ${filePath}`)), ms)
+    )
+  ])
+
 async function read({ filePath, projectPath }) {
   if (projectPath) assertProjectPath(filePath, projectPath)
   return fs.readFile(filePath, 'utf8').catch(() => '')
@@ -49,8 +70,12 @@ async function openAgentFile({ projectPath, agentFilePath }) {
   if (!fsSync.existsSync(agentContextPath)) {
     return { exists: false }
   }
-  await shell.openPath(agentContextPath)
-  return { exists: true, ok: true }
+  try {
+    await withTimeout(retryOpenPath(agentContextPath), 5000, agentContextPath)
+    return { exists: true, ok: true }
+  } catch (e) {
+    return { error: e.message }
+  }
 }
 
 async function openBrief({ projectPath }) {

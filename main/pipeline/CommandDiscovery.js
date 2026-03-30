@@ -6,13 +6,19 @@ const ActivityLog = require('./ActivityLog')
 // Hardcoded discovery prompt per §4.2 — do not modify
 const DISCOVERY_PROMPT = `You are performing a command discovery task only. Do not write any code. Do not modify any files.
 
-Read the documents provided. Based solely on their content, infer which shell commands a
-programmer agent will need to execute to implement the described project.
+Read the documents provided. Based solely on their content, infer which shell commands a programmer agent will need to execute to implement the described project.
 
-Output ONLY a JSON array of shell command strings to stdout. No explanation, no preamble,
-no markdown formatting, no backticks. Example output:
+Output ONLY a JSON array of objects. Each object has exactly two string keys:
+- "command": the shell command
+- "reason": one sentence in plain English explaining what this command does and why the project needs it. Write for a non-technical user. Do not use jargon.
 
-["npm install", "npm run build", "npm test", "pip install -r requirements.txt"]
+No explanation, no preamble, no markdown formatting, no backticks around the array or its contents.
+
+Example output:
+[
+  {"command": "npm install", "reason": "Downloads and installs all the packages this project depends on."},
+  {"command": "npm run build", "reason": "Compiles the project source code into a runnable application."}
+]
 
 If you cannot infer any commands from the documents, output an empty array: []
 
@@ -37,10 +43,14 @@ async function runDiscovery(projectPath, programmerAgent, qwenPath) {
     // Add agent's declared reads
     if (Array.isArray(programmerAgent.reads)) {
       for (const readPath of programmerAgent.reads) {
-        const fullPath = path.join(projectPath, readPath)
+        // Mirror AgentProcess path resolution: entries without Context/ prefix
+        // are resolved relative to Context/, matching what the producer agent sees.
+        const fullPath = readPath.startsWith('Context/')
+          ? path.join(projectPath, readPath)
+          : path.join(projectPath, 'Context', readPath)
         try {
           await fs.access(fullPath)
-          inputFiles.push(fullPath)
+          if (!inputFiles.includes(fullPath)) inputFiles.push(fullPath)
         } catch {
           // File doesn't exist — skip silently
         }
@@ -61,6 +71,15 @@ async function runDiscovery(projectPath, programmerAgent, qwenPath) {
     try {
       await fs.access(plannerPath)
       inputFiles.push(plannerPath)
+    } catch {
+      // Doesn't exist — skip
+    }
+
+    // Add brief.md if exists — primary project description, always relevant
+    const briefPath = path.join(projectPath, 'Context', 'brief.md')
+    try {
+      await fs.access(briefPath)
+      if (!inputFiles.includes(briefPath)) inputFiles.push(briefPath)
     } catch {
       // Doesn't exist — skip
     }
@@ -159,25 +178,41 @@ async function runDiscovery(projectPath, programmerAgent, qwenPath) {
 
         // Parse JSON from stdout
         try {
-          // Try to find JSON array in output
           const jsonMatch = stdoutData.match(/\[[\s\S]*\]/)
           if (!jsonMatch) {
             settle({ error: 'No JSON array found in output' })
             return
           }
 
-          const commands = JSON.parse(jsonMatch[0])
+          let parsed
+          try {
+            parsed = JSON.parse(jsonMatch[0])
+          } catch (e) {
+            settle({ error: `Failed to parse JSON: ${e.message}` })
+            return
+          }
 
-          if (!Array.isArray(commands)) {
+          if (!Array.isArray(parsed)) {
             settle({ error: 'Parsed output is not a JSON array' })
             return
           }
 
-          // Validate all elements are strings
-          const valid = commands.every(cmd => typeof cmd === 'string')
-          if (!valid) {
-            settle({ error: 'Output contains non-string elements' })
-            return
+          // Normalise output: handle both {command, reason} objects and plain strings.
+          // Plain string fallback ensures nothing breaks if the model ignores the format
+          // instruction on a given run.
+          const commands = []
+          for (const item of parsed) {
+            if (typeof item === 'string') {
+              commands.push({ command: item, reason: '' })
+            } else if (item && typeof item.command === 'string') {
+              commands.push({
+                command: item.command,
+                reason: typeof item.reason === 'string' ? item.reason : '',
+              })
+            } else {
+              settle({ error: 'Output contains invalid elements' })
+              return
+            }
           }
 
           await ActivityLog.append(projectPath, `DEBUG: Successfully parsed ${commands.length} commands`, 'warn')

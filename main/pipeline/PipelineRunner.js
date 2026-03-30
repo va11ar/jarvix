@@ -1,7 +1,7 @@
 const path = require('path')
 const crypto = require('crypto')
 const { ipcMain } = require('electron')
-const { PIPELINE_STATES, STEP_STATUSES, IPC, AGENT_ROLES } = require('../constants')
+const { PIPELINE_STATES, STEP_STATUSES, IPC, AGENT_ROLES, STACK_DEFAULTS, PIPE_TO_SHELL_PATTERNS } = require('../constants')
 const Checkpoint = require('../checkpoint/Checkpoint')
 const ActivityLog = require('./ActivityLog')
 const AgentLibrary = require('../project/AgentLibrary')
@@ -1178,7 +1178,7 @@ class PipelineRunner {
       let commands
       try {
         const result = await runDiscovery(projectPath, programmerAgent, qwenPath)
-        commands = result.commands
+        commands = result.commands // Array<{ command: string, reason: string }>
       } catch (e) {
         // Discovery failed
         win.webContents.send(IPC.DISCOVERY_ERROR, { message: e.message })
@@ -1193,13 +1193,55 @@ class PipelineRunner {
         })
       }
 
+      // --- Stack completion (deterministic) ---
+      // If the inferred commands imply a known stack, merge in any standard commands
+      // for that stack that were not already inferred. Uses the first token of each
+      // default command as the stack signal (e.g. "npm" for nodejs defaults).
+      const inferredSet = new Set(commands.map(c => c.command))
+
+      for (const [stack, defaults] of Object.entries(STACK_DEFAULTS)) {
+        if (stack === 'common') continue
+        const stackImplied = defaults.some(def =>
+          commands.some(c => c.command.startsWith(def.split(' ')[0]))
+        )
+        if (stackImplied) {
+          for (const def of defaults) {
+            if (!inferredSet.has(def)) {
+              commands.push({ command: def, reason: `Standard ${stack} build tool command.` })
+              inferredSet.add(def)
+            }
+          }
+        }
+      }
+
+      // Always merge common (git) commands — safe for every project.
+      for (const def of STACK_DEFAULTS.common) {
+        if (!inferredSet.has(def)) {
+          commands.push({ command: def, reason: 'Standard version control command.' })
+          inferredSet.add(def)
+        }
+      }
+
+      // --- Safety filter ---
+      // Drop commands that match pipe-to-shell patterns before user sees them.
+      // Log each drop so it is visible in ActivityLog for debugging.
+      commands = commands.filter(({ command }) => {
+        const isDangerous = PIPE_TO_SHELL_PATTERNS.some(p => p.test(command))
+        if (isDangerous) {
+          ActivityLog.append(projectPath, `Discovery: dropped pipe-to-shell pattern: ${command}`, 'warn')
+        }
+        return !isDangerous
+      })
+
       // Load baseline to compute delta
       const baselinePath = path.join(projectPath, '.qwen', 'baseline.json')
       const baseline = JSON.parse(await fs.readFile(baselinePath, 'utf8'))
       const existingAllowed = new Set(baseline.tools?.allowed || [])
 
       // Compute delta: commands not already in baseline
-      const delta = commands.filter(cmd => !existingAllowed.has(`run_shell_command(${cmd})`))
+      const delta = commands.filter(({ command }) =>
+        !existingAllowed.has(`run_shell_command(${command})`)
+      )
 
       await ActivityLog.append(projectPath, `Discovery found ${commands.length} commands, ${delta.length} need approval`, 'info')
 
@@ -1223,7 +1265,8 @@ class PipelineRunner {
         const onApprove = async () => {
           cleanup()
           try {
-            const result = await ProjectManager.addApprovedCommands(projectPath, delta)
+            const commandStrings = delta.map(({ command }) => command)
+            const result = await ProjectManager.addApprovedCommands(projectPath, commandStrings)
             if (result.error) {
               resolve({ error: result.error })
               return

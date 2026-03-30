@@ -155,7 +155,7 @@ class QaMcpRunner extends EventEmitter {
   // Requests a flagged screenshot with a note.
   // The actual capture happens here in QaMcpRunner; the server sends a
   // capture-request which triggers _handleMessage above.
-  // For the Shift+S hotkey path, Jarvix calls this directly — it triggers
+  // For the Shift+S hotkey path, Wazear calls this directly — it triggers
   // the same capture-request/capture-done round-trip as agent tool calls.
   captureWithNote(note) {
     // Directly capture here (we are already in the main process) and send

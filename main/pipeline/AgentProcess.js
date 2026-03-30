@@ -11,7 +11,7 @@ const ActivityLog = require('./ActivityLog')
 const QaMcpRunner = require('../mcp/QaMcpRunner')
 
 // PIPELINE_STATUS regex for polling agent output
-const PIPELINE_STATUS_REGEX = /^PIPELINE_STATUS:\s*(DONE|ERROR)\s*\|?\s*(ISSUES:\s*(true|false)|REASON:\s*.+)?$/m
+const PIPELINE_STATUS_REGEX = /^[*_`]*PIPELINE_STATUS:\s*(DONE|ERROR)\s*\|?\s*(ISSUES:\s*(true|false)|REASON:\s*.+?)[*_`]*$/m
 
 class AgentProcess extends EventEmitter {
   constructor(agent, projectPath, outputFilePath, win, useSandbox = false, oauthEnabled = false, qwenPath = null) {
@@ -34,7 +34,7 @@ class AgentProcess extends EventEmitter {
     // QA MCP
     this.qaMcpRunner = null   // QaMcpRunner — non-null only during a QA agent run
     this.appProcess  = null   // Target app process — non-null only if launch_command was used
-    this.mcpServerProcess = null  // QaMcpServer.js process — spawned by Jarvix, killed by Jarvix
+    this.mcpServerProcess = null  // QaMcpServer.js process — spawned by Wazear, killed by Wazear
   }
 
   /**
@@ -107,7 +107,8 @@ class AgentProcess extends EventEmitter {
 
       // Inject Output folder instructions for producer and producer-reviewer roles
       if (this.agent.role === 'producer') {
-        const outputFolderPrompt = `\n\nOUTPUT FOLDER INSTRUCTIONS:
+        const outputFolderPrompt = `\n\nOUTPUT FOLDER INSTRUCTIONS (OVERRIDE):
+Regardless of any path mentioned earlier in this prompt, the following rules govern where you write files.
 All artifacts you create (code files, articles, images, or any other deliverables)
 must be written to the Output/ subdirectory. For example:
 - Correct: Output/my-code.js, Output/article.md, Output/screenshot.png
@@ -139,7 +140,7 @@ tracking purposes — do not review this file as an artifact.`
       // Append the injected footer
       // Output path is relative to Qwen's cwd (projectPath), so just Context/filename
       const outputRelativePath = `Context/${outputFileName}`
-      const footerPrompt = `\n\nYou must write your progress tracking file to \`${outputRelativePath}\`. Use your file writing tools to do this — do not print your output to the terminal.\n\nAll other artifacts you create (images, text files, binaries, or any other deliverables) must be written to the Output/ subdirectory as specified above.\n\nThe very last line of the file you write must be exactly one of:\n\n\`PIPELINE_STATUS: DONE | ISSUES: false\` — task complete, no issues found\n\n\`PIPELINE_STATUS: DONE | ISSUES: true\` — task complete, issues found (review agents only)\n\n\`PIPELINE_STATUS: ERROR | REASON: <brief description>\` — task could not be completed\n\nDo not omit this line. Do not paraphrase it. Do not add anything after it.`
+      const footerPrompt = `\n\nYou must write your progress tracking file to \`${outputRelativePath}\`. Use your file writing tools to do this — do not print your output to the terminal.\n\nAll other artifacts you create (images, text files, binaries, or any other deliverables) must be written to the Output/ subdirectory as specified above.\n\nThe very last line of the file you write must be exactly one of the following three lines,\ncopied character-for-character with no formatting, no backticks, no bold, no asterisks,\nand nothing after it:\n\nPIPELINE_STATUS: DONE | ISSUES: false\nPIPELINE_STATUS: DONE | ISSUES: true\nPIPELINE_STATUS: ERROR | REASON: <brief description>\n\nRules for this line:\n- It must be the very last line in the file.\n- Do not wrap it in backticks, asterisks, bold, or any other markdown formatting.\n- Do not add a period, dash, comment, or any other text after it.\n- Do not print it to the terminal. Write it to the file.`
       promptParts.push(footerPrompt)
 
       const fullPrompt = promptParts.join('')
@@ -155,9 +156,10 @@ tracking purposes — do not review this file as an artifact.`
    * Spawn the Qwen Code CLI process with the given prompt
    * @param {string} fullPrompt - The complete prompt to pass to Qwen
    * @param {string|null} allowedMcpServerNames - MCP server names to allow (comma-separated), or null
+   * @param {string[]|null} allowedTools - Tool names to allow in non-interactive mode, or null
    * @returns {Promise<{ok: boolean, error?: string}>}
    */
-  async _spawnQwen(fullPrompt, allowedMcpServerNames = null) {
+  async _spawnQwen(fullPrompt, allowedMcpServerNames = null, allowedTools = null) {
     try {
       // Create completion promise for efficient waiting
       this._completionPromise = new Promise((resolve) => {
@@ -182,6 +184,11 @@ tracking purposes — do not review this file as an artifact.`
       // Add allowed MCP server names if specified (for QA agent)
       if (allowedMcpServerNames) {
         qwenArgs.push('--allowed-mcp-server-names', allowedMcpServerNames)
+      }
+
+      // Add allowed tools if specified (for QA agent MCP tools in non-interactive mode)
+      if (allowedTools && allowedTools.length > 0) {
+        qwenArgs.push('--allowed-tools', allowedTools.join(','))
       }
 
       // Only add --auth-type if OAuth is not enabled
@@ -262,13 +269,13 @@ tracking purposes — do not review this file as an artifact.`
             const content = await fs.readFile(this.outputFilePath, 'utf8')
             const match = PIPELINE_STATUS_REGEX.exec(content)
             if (match) {
-              this.status = match[0].trim()
+              this.status = match[0].trim().replace(/^[*_`]+|[*_`]+$/g, '').trim()
             } else {
               // File exists but no status — check stdout as fallback
               const stdoutContent = stdoutLines.join('\n')
               const stdoutMatch = PIPELINE_STATUS_REGEX.exec(stdoutContent)
               if (stdoutMatch) {
-                this.status = stdoutMatch[0].trim()
+                this.status = stdoutMatch[0].trim().replace(/^[*_`]+|[*_`]+$/g, '').trim()
                 await ActivityLog.append(this.projectPath, `PIPELINE_STATUS detected in stdout (output file missing status)`, 'warn')
               } else {
                 await ActivityLog.append(this.projectPath, `Agent output file exists but missing PIPELINE_STATUS line`, 'warn')
@@ -280,7 +287,7 @@ tracking purposes — do not review this file as an artifact.`
             const stdoutContent = stdoutLines.join('\n')
             const stdoutMatch = PIPELINE_STATUS_REGEX.exec(stdoutContent)
             if (stdoutMatch) {
-              this.status = stdoutMatch[0].trim()
+              this.status = stdoutMatch[0].trim().replace(/^[*_`]+|[*_`]+$/g, '').trim()
               await ActivityLog.append(this.projectPath, `PIPELINE_STATUS detected in stdout (output file not written)`, 'warn')
               // Optionally save stdout content to output file for downstream agents
               try {
@@ -351,14 +358,14 @@ tracking purposes — do not review this file as an artifact.`
             const content = await fs.readFile(this.outputFilePath, 'utf8')
             const match = PIPELINE_STATUS_REGEX.exec(content)
             if (match) {
-              this.status = match[0].trim()
+              this.status = match[0].trim().replace(/^[*_`]+|[*_`]+$/g, '').trim()
             }
           } catch {
             // File not found or unreadable — check stdout for PIPELINE_STATUS
             const stdoutContent = stdoutLines.join('\n')
             const stdoutMatch = PIPELINE_STATUS_REGEX.exec(stdoutContent)
             if (stdoutMatch) {
-              this.status = stdoutMatch[0].trim()
+              this.status = stdoutMatch[0].trim().replace(/^[*_`]+|[*_`]+$/g, '').trim()
               await ActivityLog.append(this.projectPath, `PIPELINE_STATUS detected in stdout (output file not written)`, 'warn')
               try {
                 await fs.writeFile(this.outputFilePath, stdoutContent, 'utf8')
@@ -416,7 +423,7 @@ tracking purposes — do not review this file as an artifact.`
       // Start polling the output file for PIPELINE_STATUS
       this.poller = createPoller(this.outputFilePath, PIPELINE_STATUS_REGEX, 2000)
       this.poller.on('match', (fullMatch) => {
-        this.status = fullMatch.trim()
+        this.status = fullMatch.trim().replace(/^[*_`]+|[*_`]+$/g, '').trim()
         ActivityLog.append(this.projectPath, `Poller detected status: ${this.status}`, 'info')
         this._cleanup()
         if (this._completionResolve) {
@@ -737,14 +744,14 @@ tracking purposes — do not review this file as an artifact.`
    *
    * Note: the old version of this method also mutated settings.tools.allowed
    * to permit a shell spawn of node. That mutation is intentionally absent here
-   * because Jarvix now spawns the server directly — Qwen never runs a shell
+   * because Wazear now spawns the server directly — Qwen never runs a shell
    * command for this purpose.
    */
   async _appendMcpServerConfig(port) {
     const settingsPath = path.join(this.projectPath, '.qwen', 'settings.json')
     const settings     = JSON.parse(await fs.readFile(settingsPath, 'utf8'))
 
-    // Use HTTP transport - Jarvix spawns the server, Qwen connects via HTTP.
+    // Use HTTP transport - Wazear spawns the server, Qwen connects via HTTP.
     // trust: true bypasses tool call confirmation for jarvix-qa tools.
     // httpUrl: tells Qwen this is an HTTP-based MCP server (not SSE or stdio).
     settings.mcpServers = {
@@ -843,9 +850,14 @@ The \`ISSUES\` value is determined SOLELY by the flagged item count from \`qa_ge
 Do NOT consider whether the user clicked "Done" or "All Good" — only the flagged count matters.
 The user clicking "Done" only means "I am finished testing", NOT "everything is fine".
 
-The status line in \`Context/qa.md\` must be exactly one of:
-- \`PIPELINE_STATUS: DONE | ISSUES: true\` — if qa_get_flagged returned any items (count > 0)
-- \`PIPELINE_STATUS: DONE | ISSUES: false\` — if qa_get_flagged returned ZERO items AND no visible defects
+The status line in \`Context/qa.md\` must be exactly one of the following two lines,
+copied character-for-character with no formatting, no backticks, no bold, no asterisks:
+
+PIPELINE_STATUS: DONE | ISSUES: true
+PIPELINE_STATUS: DONE | ISSUES: false
+
+- Use PIPELINE_STATUS: DONE | ISSUES: true if qa_get_flagged returned any items (count > 0)
+- Use PIPELINE_STATUS: DONE | ISSUES: false if qa_get_flagged returned ZERO items AND no visible defects
 
 Do not write anything else to \`Context/qa.md\`. Do not write the report to \`Context/qa.md\`.`
         promptParts.push(qaPrompt)
@@ -880,7 +892,7 @@ tracking purposes — do not review this file as an artifact.`
       } else {
         // Default footer for other agents
         const outputRelativePath = `Context/${outputFileName}`
-        const footerPrompt = `\n\nYou must write your progress tracking file to \`${outputRelativePath}\`. Use your file writing tools to do this — do not print your output to the terminal.\n\nAll other artifacts you create (images, text files, binaries, or any other deliverables) must be written to the Output/ subdirectory as specified above.\n\nThe very last line of the file you write must be exactly one of:\n\n\`PIPELINE_STATUS: DONE | ISSUES: false\` — task complete, no issues found\n\n\`PIPELINE_STATUS: DONE | ISSUES: true\` — task complete, issues found (review agents only)\n\n\`PIPELINE_STATUS: ERROR | REASON: <brief description>\` — task could not be completed\n\nDo not omit this line. Do not paraphrase it. Do not add anything after it.`
+        const footerPrompt = `\n\nYou must write your progress tracking file to \`${outputRelativePath}\`. Use your file writing tools to do this — do not print your output to the terminal.\n\nAll other artifacts you create (images, text files, binaries, or any other deliverables) must be written to the Output/ subdirectory as specified above.\n\nThe very last line of the file you write must be exactly one of the following three lines,\ncopied character-for-character with no formatting, no backticks, no bold, no asterisks,\nand nothing after it:\n\nPIPELINE_STATUS: DONE | ISSUES: false\nPIPELINE_STATUS: DONE | ISSUES: true\nPIPELINE_STATUS: ERROR | REASON: <brief description>\n\nRules for this line:\n- It must be the very last line in the file.\n- Do not wrap it in backticks, asterisks, bold, or any other markdown formatting.\n- Do not add a period, dash, comment, or any other text after it.\n- Do not print it to the terminal. Write it to the file.`
         promptParts.push(footerPrompt)
       }
 
@@ -889,9 +901,16 @@ tracking purposes — do not review this file as an artifact.`
       // 8. Spawn Qwen. It connects to the MCP server via HTTP.
       // Do NOT pass --allowed-mcp-server-names - let Qwen discover all available
       // MCP servers from settings.json.
+      // Pass --allowed-tools for QA agent MCP tools to bypass non-interactive gate
       await ActivityLog.append(this.projectPath, `Spawning Qwen with MCP server (port ${mcpPort})`, 'info')
       await ActivityLog.append(this.projectPath, `QA agent MCP tools available: qa_wait_for_user, qa_take_screenshot, qa_get_screenshots, qa_get_flagged`, 'info')
-      await this._spawnQwen(fullPrompt, null)
+      const QA_MCP_TOOLS = [
+        'mcp__jarvix-qa__qa_wait_for_user',
+        'mcp__jarvix-qa__qa_take_screenshot',
+        'mcp__jarvix-qa__qa_get_screenshots',
+        'mcp__jarvix-qa__qa_get_flagged',
+      ]
+      await this._spawnQwen(fullPrompt, null, QA_MCP_TOOLS)
 
       // 9. Signal PipelineRunner to enter waiting-for-user state.
       this.emit('qa:waiting-for-user')
@@ -912,13 +931,13 @@ tracking purposes — do not review this file as an artifact.`
       this.qaMcpRunner = null
     }
 
-    // 2. Kill QaMcpServer.js — Jarvix spawned it, Jarvix kills it.
+    // 2. Kill QaMcpServer.js — Wazear spawned it, Wazear kills it.
     if (this.mcpServerProcess) {
       this.mcpServerProcess.kill()
       this.mcpServerProcess = null
     }
 
-    // 3. Kill target app if Jarvix launched it.
+    // 3. Kill target app if Wazear launched it.
     if (this.appProcess) {
       this.appProcess.kill()
       this.appProcess = null

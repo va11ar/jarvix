@@ -181,9 +181,9 @@ async function createBoilerplate({ name, reads, review_target, loop, timeout_sec
   }).trim()
 
   // Boilerplate content with helpful comments
-  const boilerplateContent = `# JARVIX Agent Definition
+  const boilerplateContent = `# WAZEAR Agent Definition
 # ========================
-# id: DO NOT EDIT — used by Jarvix to track this agent across projects.
+# id: DO NOT EDIT — used by Wazear to track this agent across projects.
 # name: Human-readable label shown in the pipeline UI.
 #
 # reads: List of Context/ files this agent reads as input.
@@ -196,7 +196,7 @@ async function createBoilerplate({ name, reads, review_target, loop, timeout_sec
 #   type: "revision" (bounded loop with max_revision_loops) or "iteration" (unbounded)
 #   max_revision_loops: Required only if type is "revision". Default: 5
 #
-# timeout_seconds: Time limit before Jarvix kills the agent and surfaces an error.
+# timeout_seconds: Time limit before Wazear kills the agent and surfaces an error.
 #   Default: 300
 #
 # allowedCommands: Shell commands this agent is permitted to run.
@@ -221,9 +221,12 @@ ${frontMatter}
 #   - Descriptions of what good output looks like
 #   - Anything the agent can discover by reading files itself
 #
-# OUTPUT: The agent must write its output to Context/<agentname>.md
+# OUTPUT: Do NOT hardcode output paths in this prompt.
+# Wazear injects the correct path instructions at runtime based on the agent's role:
+# - producer: artifacts go to Output/, progress file goes to Context/<agentname>.md
+# - all other roles: output goes to Context/<agentname>.md
 #
-# Jarvix automatically appends the required PIPELINE_STATUS signal to your prompt
+# Wazear automatically appends the required PIPELINE_STATUS signal to your prompt
 # at runtime — you do not need to include it. For reference, the agent must write
 # one of the following as the last line of its output file:
 #

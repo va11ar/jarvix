@@ -48,7 +48,7 @@ function waitForUserDone() {
 }
 
 // ── Pending capture coordination ──────────────────────────────────────────────
-// When the server needs a screenshot, it sends a capture-request to Jarvix and
+// When the server needs a screenshot, it sends a capture-request to Wazear and
 // waits for a capture-done response. Only one capture can be in-flight at a time.
 let pendingCaptureResolve = null
 let pendingCaptureReject  = null
@@ -62,7 +62,7 @@ function requestCapture(note, flagged) {
     const timeout = setTimeout(() => {
       pendingCaptureResolve = null
       pendingCaptureReject  = null
-      reject(new Error('Screenshot capture timed out — no response from Jarvix'))
+      reject(new Error('Screenshot capture timed out — no response from Wazear'))
     }, CAPTURE_TIMEOUT_MS)
 
     sendToJarvix({ type: 'capture-request', note: note || '', flagged: Boolean(flagged) })
@@ -76,15 +76,15 @@ function requestCapture(note, flagged) {
   })
 }
 
-// ── Unix socket server (Jarvix control channel) ───────────────────────────────
+// ── Unix socket server (Wazear control channel) ───────────────────────────────
 // Messages are newline-delimited JSON objects.
 //
-// Inbound (from Jarvix):
+// Inbound (from Wazear):
 //   { type: 'user-done' }
 //   { type: 'capture-done', filename, timestamp }
 //   { type: 'capture-error', message }
 //
-// Outbound (to Jarvix):
+// Outbound (to Wazear):
 //   { type: 'capture-request', note, flagged }
 //   { type: 'screenshot-taken', filename, note, flagged, timestamp }
 //
@@ -92,7 +92,7 @@ function requestCapture(note, flagged) {
 // QaMcpRunner learns the server is ready by polling for the .jarvix-qa-socket file,
 // not by waiting for a socket message. Do not add a 'ready' send here.
 
-let controlSocket = null   // The connected Jarvix socket, once it connects
+let controlSocket = null   // The connected Wazear socket, once it connects
 
 function startSocketServer() {
   return new Promise((resolve, reject) => {
@@ -180,7 +180,7 @@ function handleControlMessage(msg) {
       screenshots.push(entry)
     }
 
-    // Notify Jarvix UI so it can flash a confirmation
+    // Notify Wazear UI so it can flash a confirmation
     sendToJarvix({
       type:      'screenshot-taken',
       filename:  entry.filename,
@@ -233,7 +233,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
       name: 'qa_wait_for_user',
       description:
         'Block until the user signals they have finished testing by clicking ' +
-        '"Done — Write Report" in Jarvix. ' +
+        '"Done — Write Report" in Wazear. ' +
         'ALWAYS call this tool first, before any other QA tool. ' +
         'Do not write the report or call qa_get_screenshots until this returns.',
       inputSchema: { type: 'object', properties: {}, required: [] },
@@ -372,12 +372,12 @@ async function main() {
     await fs.unlink(SOCKET_PATH).catch(() => {})
   }
 
-  // Start the Jarvix control socket first, before connecting MCP stdio.
-  // This ensures the socket is ready before Jarvix tries to connect.
+  // Start the Wazear control socket first, before connecting MCP stdio.
+  // This ensures the socket is ready before Wazear tries to connect.
   await startSocketServer()
 
   // Start HTTP server for Streamable HTTP transport.
-  // Qwen Code connects here. Jarvix does not use this channel.
+  // Qwen Code connects here. Wazear does not use this channel.
   const transport = new StreamableHTTPServerTransport({
     sessionIdGenerator: () => require('crypto').randomUUID(),
   })

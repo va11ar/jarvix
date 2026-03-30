@@ -1,5 +1,5 @@
 {
-  "name": "jarvix",
+  "name": "wazear",
   "version": "0.1.0",
   "description": "Desktop application that orchestrates a pipeline of Qwen Code CLI agents",
   "main": "main/index.js",
@@ -14,7 +14,7 @@
     "orchestration",
     "qwen"
   ],
-  "author": "JARVIX",
+  "author": "WAZEAR",
   "license": "MIT",
   "devDependencies": {
     "@electron-forge/cli": "^6.0.0",

@@ -210,8 +210,8 @@ async function testModelsEndpoint(baseUrl, apiKey, provider) {
     
     // OpenRouter requires/recommends these headers
     if (provider === 'openrouter') {
-      headers['HTTP-Referer'] = 'https://github.com/jarvix'
-      headers['X-OpenRouter-Title'] = 'JARVIX'
+      headers['HTTP-Referer'] = 'https://github.com/wazear'
+      headers['X-OpenRouter-Title'] = 'WAZEAR'
     }
 
     const options = {

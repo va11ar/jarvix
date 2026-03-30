@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>JARVIX</title>
+  <title>WAZEAR</title>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -245,7 +245,7 @@
         <!-- Step 2: Stack Selection -->
         <div id="dialog-step-2" class="hidden">
           <span class="field-label">Project stack</span>
-          <div class="field-hint">Select all that apply. JARVIX will generate a safe command whitelist for each selected stack.</div>
+          <div class="field-hint">Select all that apply. WAZEAR will generate a safe command whitelist for each selected stack.</div>
           <div class="stack-grid" id="stack-picker-list"></div>
           <div class="field-hint" style="margin-top:10px;">Git commands are included for all projects regardless of selection.</div>
         </div>
@@ -285,7 +285,7 @@
   <div class="overlay hidden" id="dialog-onboarding">
     <div class="dialog onboarding-dialog">
       <div class="onboarding-header">
-        <div class="onboarding-title">Welcome to Jarvix!</div>
+        <div class="onboarding-title">Welcome to Wazear!</div>
         <div class="onboarding-subtitle">An AI agent orchestrator that helps you simulate a full software development life cycle.</div>
       </div>
       
@@ -294,7 +294,7 @@
         <div class="onboarding-step" id="onboarding-step-1">
           <div class="onboarding-step-title">Let's get started</div>
           <p class="onboarding-text">
-            Jarvix has a few dependencies that it runs on. It uses Qwen CLI under the hood as agents that work on your project brief. 
+            Wazear has a few dependencies that it runs on. It uses Qwen CLI under the hood as agents that work on your project brief.
             Qwen CLI in turn requires NodeJS to function. So you'll need to install both on your system:
           </p>
           <div class="onboarding-links">
@@ -317,7 +317,7 @@
         <div class="onboarding-step hidden" id="onboarding-step-3">
           <div class="onboarding-step-title">Authenticate with an AI Provider</div>
           <p class="onboarding-text">
-            Now that we have everything we need, next we'll authenticate Jarvix so it can run Qwen without having to ask you every single time it launches an agent.
+            Now that we have everything we need, next we'll authenticate Wazear so it can run Qwen without having to ask you every single time it launches an agent.
           </p>
           <p class="onboarding-text">There are two ways to use Qwen:</p>
           <ol class="onboarding-list">
@@ -339,12 +339,12 @@
             Great, now that you've finished the setup, you can create a new project. One last thing before we let you go.
           </p>
           <p class="onboarding-text">
-            Jarvix uses what we call agents. Each agent is a Qwen instance that is running under the hood. Each agent has a persona or a role that it plays in the
+            Wazear uses what we call agents. Each agent is a Qwen instance that is running under the hood. Each agent has a persona or a role that it plays in the
             pipeline (the development process of your project). These agents are defined as <code>.md</code> files. You can modify them any time by editing the files in:
           </p>
           <div class="onboarding-path" id="onboarding-agents-path"></div>
           <p class="onboarding-text">
-            Jarvix ships with some ready made agents that we believe work well with most software development pipelines. You can choose to add them to your list of agents or not. You can do that by clicking the button below.
+            Wazear ships with some ready made agents that we believe work well with most software development pipelines. You can choose to add them to your list of agents or not. You can do that by clicking the button below.
           </p>
           <p class="onboarding-text">
             That said, feel free to read them, edit or create new ones.
@@ -452,7 +452,7 @@
       </div>
       <div class="dialog-body" style="padding:16px;">
         <p style="color:var(--text-dim);line-height:1.6;">
-          Using OAuth authentication requires you to run Qwen Code independent of Jarvix first to initiate the authentication flow since the way Jarvix runs Qwen Code won't allow an interaction directly which prevents normal OAuth.
+          Using OAuth authentication requires you to run Qwen Code independent of Wazear first to initiate the authentication flow since the way Wazear runs Qwen Code won't allow an interaction directly which prevents normal OAuth.
         </p>
       </div>
       <div class="dialog-footer">
@@ -619,11 +619,11 @@
   <div class="overlay hidden" id="dialog-exit-confirm">
     <div class="dialog" style="width:420px;">
       <div class="dialog-header">
-        <div class="dialog-title">Exit JARVIX</div>
+        <div class="dialog-title">Exit WAZEAR</div>
       </div>
       <div class="dialog-body" style="padding:16px;">
         <p style="color:var(--text-dim);margin-bottom:12px;">
-          Are you sure you want to exit JARVIX?
+          Are you sure you want to exit WAZEAR?
         </p>
       </div>
       <div class="dialog-footer">
@@ -715,7 +715,7 @@
           </p>
         </div>
         <p style="color:var(--text-dim);margin-bottom:12px;font-size:11px;line-height:1.6;">
-          After pressing Shift + S, a text field will appear here in Jarvix. Write a comment
+          After pressing Shift + S, a text field will appear here in Wazear. Write a comment
           describing the issue you just captured, then press <strong>OK</strong> to save the
           screenshot and comment together. You can then take another screenshot.
         </p>
