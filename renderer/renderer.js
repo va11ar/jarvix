@@ -665,6 +665,7 @@ function setupFileMenu() {
   const menuOpenBrief = document.getElementById('file-menu-open-brief')
   const menuOpenAgentsFolder = document.getElementById('file-menu-open-agents-folder')
   const menuPreferences = document.getElementById('file-menu-preferences')
+  const menuSupport = document.getElementById('file-menu-support')
   const menuExit = document.getElementById('file-menu-exit')
 
   // Toggle menu on Menu button click
@@ -712,6 +713,12 @@ function setupFileMenu() {
     e.stopPropagation()
     hideFileMenu()
     handleFileMenuPreferences()
+  })
+
+  menuSupport.addEventListener('click', (e) => {
+    e.stopPropagation()
+    hideFileMenu()
+    window.api.openExternal('https://tally.so/r/9qdYpQ')
   })
 
   menuExit.addEventListener('click', (e) => {

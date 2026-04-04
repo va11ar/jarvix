@@ -203,13 +203,14 @@ class PipelineRunner {
         if (existingCheckpoint?.steps?.[i]) {
           // Preserve existing status (skipped, complete, error) from checkpoint
           const existingStatus = existingCheckpoint.steps[i].status
-          if (existingStatus === STEP_STATUSES.SKIPPED || 
-              existingStatus === STEP_STATUSES.COMPLETE || 
-              existingStatus === STEP_STATUSES.ERROR) {
+          if (existingStatus === STEP_STATUSES.SKIPPED) {
+            // Preserve explicit user skip intent across runs
             status = existingStatus
           } else if (i < startIndex) {
+            // Resuming mid-pipeline: mark prior steps as complete
             status = STEP_STATUSES.COMPLETE
           }
+          // COMPLETE and ERROR from prior runs reset to IDLE — they will re-run unless skipped
         } else if (i < startIndex) {
           status = STEP_STATUSES.COMPLETE
         }
@@ -794,11 +795,9 @@ class PipelineRunner {
 
     const step = this.steps[stepIndex]
 
-    // Can't skip already completed or skipped agents (but CAN skip ERROR status for Resume)
-    if (step.status === STEP_STATUSES.COMPLETE) {
-      return { ok: false, error: 'Cannot skip a completed agent' }
-    }
-
+    // Can only skip agents that are not already skipped.
+    // COMPLETE agents from a prior run CAN be skipped for the next iteration.
+    // RUNNING agents cannot be skipped here (blocked by the state === RUNNING guard above).
     if (step.status === STEP_STATUSES.SKIPPED) {
       return { ok: false, error: 'Agent is already skipped' }
     }

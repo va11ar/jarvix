@@ -121,7 +121,15 @@ When you need to read existing artifacts to iterate on feedback, read them from
 the Output/ subdirectory.
 
 Your progress tracking file (Context/${outputFileName}) stays in the Context/ folder —
-only user-facing artifacts go to Output/.`
+only user-facing artifacts go to Output/.
+
+EXECUTION ORDER (MANDATORY):
+Do not narrate your plan. Do not summarize what you are about to do. Do not print
+outlines, component lists, or architecture notes to the terminal.
+
+The first tool call you make must be a file write to Output/. Writing your first
+output artifact is your only permitted starting action. Plan in your internal
+reasoning only — never in terminal output.`
         promptParts.push(outputFolderPrompt)
       } else if (this.agent.role === 'producer-reviewer') {
         const reviewerPrompt = `\n\nREVIEWER ARTIFACT LOCATION:
