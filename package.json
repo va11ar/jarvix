@@ -6,7 +6,8 @@
   "scripts": {
     "start": "electron-forge start",
     "package": "electron-forge package",
-    "make": "electron-forge make"
+    "make": "electron-forge make",
+    "postmake": "node scripts/compile-bytecode.js"
   },
   "keywords": [
     "electron",
@@ -24,7 +25,9 @@
     "electron": "^37.10.3"
   },
   "dependencies": {
+    "@electron/asar": "^4.2.0",
     "@modelcontextprotocol/sdk": "^1.0.0",
+    "bytenode": "^1.5.7",
     "js-yaml": "^4.1.0"
   }
 }

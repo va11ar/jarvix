@@ -42,14 +42,33 @@ class FilePoller extends EventEmitter {
       // Read if file has grown OR if we haven't read it yet (initial check)
       if (newSize > this.lastSize || this.lastSize === 0) {
         const content = await fs.readFile(this.filePath, 'utf8')
-        const match = this.pattern.exec(content)
 
-        if (match) {
-          const fullMatch = match[0]
-          // Only emit if it's a new match (different from last)
-          if (fullMatch !== this.lastMatch) {
-            this.lastMatch = fullMatch
-            this.emit('match', fullMatch, match)
+        // If no pattern provided, try to parse as JSON status file
+        if (!this.pattern) {
+          try {
+            const parsed = JSON.parse(content)
+            if (parsed.status === 'DONE' || parsed.status === 'ERROR') {
+              const normalised = parsed.status === 'DONE'
+                ? `PIPELINE_STATUS: DONE | ISSUES: ${parsed.issues === true ? 'true' : 'false'}`
+                : `PIPELINE_STATUS: ERROR | REASON: ${parsed.reason || 'unknown'}`
+              if (normalised !== this.lastMatch) {
+                this.lastMatch = normalised
+                this.emit('match', normalised)
+              }
+            }
+          } catch {
+            // Not valid JSON yet (agent still writing) — continue polling
+          }
+        } else {
+          const match = this.pattern.exec(content)
+
+          if (match) {
+            const fullMatch = match[0]
+            // Only emit if it's a new match (different from last)
+            if (fullMatch !== this.lastMatch) {
+              this.lastMatch = fullMatch
+              this.emit('match', fullMatch, match)
+            }
           }
         }
 

@@ -10,8 +10,32 @@ const { createPoller } = require('./FilePoller')
 const ActivityLog = require('./ActivityLog')
 const QaMcpRunner = require('../mcp/QaMcpRunner')
 
-// PIPELINE_STATUS regex for polling agent output
-const PIPELINE_STATUS_REGEX = /^[*_`]*PIPELINE_STATUS:\s*(DONE|ERROR)\s*\|?\s*(ISSUES:\s*(true|false)|REASON:\s*.+?)[*_`]*$/m
+require('events').setMaxListeners(20)
+
+/**
+ * Read and parse the agent's status JSON file.
+ * Returns a normalised status string compatible with existing PipelineRunner
+ * checks (e.g. "PIPELINE_STATUS: DONE | ISSUES: false"), or null if the file
+ * does not exist or cannot be parsed.
+ *
+ * @param {string} statusFilePath - Absolute path to the <agentname>-status.json file
+ * @returns {Promise<string|null>}
+ */
+async function readStatusJson(statusFilePath) {
+  try {
+    const raw = await fs.readFile(statusFilePath, 'utf8')
+    const parsed = JSON.parse(raw)
+    if (parsed.status === 'DONE') {
+      return `PIPELINE_STATUS: DONE | ISSUES: ${parsed.issues === true ? 'true' : 'false'}`
+    }
+    if (parsed.status === 'ERROR') {
+      return `PIPELINE_STATUS: ERROR | REASON: ${parsed.reason || 'unknown'}`
+    }
+    return null
+  } catch {
+    return null
+  }
+}
 
 class AgentProcess extends EventEmitter {
   constructor(agent, projectPath, outputFilePath, win, useSandbox = false, oauthEnabled = false, qwenPath = null) {
@@ -29,6 +53,7 @@ class AgentProcess extends EventEmitter {
     this.exitCode = null
     this.status = null // PIPELINE_STATUS value
     this.exitReason = null
+    this.statusFilePath = null  // set in spawn() / _spawnQaAgent()
     this._completionPromise = null
     this._completionResolve = null
     // QA MCP
@@ -51,8 +76,18 @@ class AgentProcess extends EventEmitter {
       const outputDir = path.join(this.projectPath, 'Output')
       await fs.mkdir(outputDir, { recursive: true })
 
+      // Derive file names once, use throughout spawn()
+      const outputFileName = path.basename(this.outputFilePath)
+      const statusFileName = path.basename(this.outputFilePath, '.md') + '-status.json'
+      const outputRelativePath = `Context/${outputFileName}`
+      const statusRelativePath = `Context/${statusFileName}`
+      this.statusFilePath = path.join(path.dirname(this.outputFilePath), statusFileName)
+
+      // File-writing anchor injected at the very beginning of the prompt (attention primacy)
+      const fileAnchor = `CRITICAL: When your task is complete, you must write two files using your file writing tools — not print to terminal:\n1. Your output to \`${outputRelativePath}\`\n2. Your status to \`${statusRelativePath}\` as JSON: {"status":"DONE","issues":false} or {"status":"ERROR","reason":"..."}\n\n`
+
       // Construct the prompt by reading all files in agent.reads
-      const promptParts = [this.agent.prompt]
+      const promptParts = [fileAnchor, this.agent.prompt]
 
       // Inject global instruction: Do NOT ask questions
       const noQuestionsPrompt = `\n\nDo NOT ask questions, use best assumption with the information you have.`
@@ -102,8 +137,22 @@ class AgentProcess extends EventEmitter {
         }
       }
 
-      // Get output file name for injection
-      const outputFileName = path.basename(this.outputFilePath)
+      // Append the injected footer
+      const footerPrompt = `\n\nWhen you finish your task, write your progress notes to \`${outputRelativePath}\` as normal.
+
+You must also write a separate status file to \`${statusRelativePath}\`. This file must contain only valid JSON — nothing else. Use one of these exact structures:
+
+If completed with no issues:
+{"status":"DONE","issues":false}
+
+If completed but issues were found:
+{"status":"DONE","issues":true}
+
+If an error occurred:
+{"status":"ERROR","reason":"brief description"}
+
+Write the status file last, after your progress notes are complete.`
+      promptParts.push(footerPrompt)
 
       // Inject Output folder instructions for producer and producer-reviewer roles
       if (this.agent.role === 'producer') {
@@ -144,12 +193,6 @@ The producer's progress file (Context/${outputFileName}) remains in Context/ for
 tracking purposes — do not review this file as an artifact.`
         promptParts.push(reviewerPrompt)
       }
-
-      // Append the injected footer
-      // Output path is relative to Qwen's cwd (projectPath), so just Context/filename
-      const outputRelativePath = `Context/${outputFileName}`
-      const footerPrompt = `\n\nYou must write your progress tracking file to \`${outputRelativePath}\`. Use your file writing tools to do this — do not print your output to the terminal.\n\nAll other artifacts you create (images, text files, binaries, or any other deliverables) must be written to the Output/ subdirectory as specified above.\n\nThe very last line of the file you write must be exactly one of the following three lines,\ncopied character-for-character with no formatting, no backticks, no bold, no asterisks,\nand nothing after it:\n\nPIPELINE_STATUS: DONE | ISSUES: false\nPIPELINE_STATUS: DONE | ISSUES: true\nPIPELINE_STATUS: ERROR | REASON: <brief description>\n\nRules for this line:\n- It must be the very last line in the file.\n- Do not wrap it in backticks, asterisks, bold, or any other markdown formatting.\n- Do not add a period, dash, comment, or any other text after it.\n- Do not print it to the terminal. Write it to the file.`
-      promptParts.push(footerPrompt)
 
       const fullPrompt = promptParts.join('')
 
@@ -269,89 +312,19 @@ tracking purposes — do not review this file as an artifact.`
       // Handle process exit
       this.process.on('exit', async (code) => {
         this.exitCode = code
-        // Before resolving, check the output file one more time for PIPELINE_STATUS
-        // This catches the case where Qwen writes the status line and exits before
-        // the poller's next interval check
+        // Read status from JSON file
         if (!this.status) {
-          try {
-            const content = await fs.readFile(this.outputFilePath, 'utf8')
-            const match = PIPELINE_STATUS_REGEX.exec(content)
-            if (match) {
-              this.status = match[0].trim().replace(/^[*_`]+|[*_`]+$/g, '').trim()
-            } else {
-              // File exists but no status — check stdout as fallback
-              const stdoutContent = stdoutLines.join('\n')
-              const stdoutMatch = PIPELINE_STATUS_REGEX.exec(stdoutContent)
-              if (stdoutMatch) {
-                this.status = stdoutMatch[0].trim().replace(/^[*_`]+|[*_`]+$/g, '').trim()
-                await ActivityLog.append(this.projectPath, `PIPELINE_STATUS detected in stdout (output file missing status)`, 'warn')
-              } else {
-                await ActivityLog.append(this.projectPath, `Agent output file exists but missing PIPELINE_STATUS line`, 'warn')
-              }
-            }
-          } catch (readErr) {
-            // File not found or unreadable — check stdout for PIPELINE_STATUS
-            // This handles cases where Qwen outputs status to stdout instead of writing the file
-            const stdoutContent = stdoutLines.join('\n')
-            const stdoutMatch = PIPELINE_STATUS_REGEX.exec(stdoutContent)
-            if (stdoutMatch) {
-              this.status = stdoutMatch[0].trim().replace(/^[*_`]+|[*_`]+$/g, '').trim()
-              await ActivityLog.append(this.projectPath, `PIPELINE_STATUS detected in stdout (output file not written)`, 'warn')
-              // Optionally save stdout content to output file for downstream agents
-              try {
-                await fs.writeFile(this.outputFilePath, stdoutContent, 'utf8')
-                await ActivityLog.append(this.projectPath, `Agent output saved to ${this.outputFilePath}`, 'info')
-              } catch (writeErr) {
-                await ActivityLog.append(this.projectPath, `Failed to save stdout to output file: ${writeErr.message}`, 'warn')
-              }
-            } else {
-              // No status in stdout — check if agent is asking clarifying questions
-              const clarifyingPatterns = [
-                /please clarify/i,
-                /let me clarify/i,
-                /could you clarify/i,
-                /can you clarify/i,
-                /please provide/i,
-                /could you provide/i,
-                /please specify/i,
-                /please confirm/i,
-                /should i/i,
-                /would you like/i,
-                /do you want/i,
-                /how many/i,
-                /which one/i,
-                /what (is|are|should|do|did|would)/i
-              ]
-              const isAskingQuestions = clarifyingPatterns.some(pattern => pattern.test(stdoutContent))
-
-              if (isAskingQuestions) {
-                // Agent is asking questions instead of completing task — treat as error
-                await ActivityLog.append(this.projectPath, `Agent is asking clarifying questions instead of completing task`, 'error')
-                await ActivityLog.append(this.projectPath, `Agent output (${stdoutLines.length} stdout lines):`, 'error')
-                for (const line of stdoutLines.slice(0, 10)) {
-                  await ActivityLog.append(this.projectPath, `  stdout: ${line}`, 'error')
-                }
-              } else if (approvalError) {
-                // Approval error detected in stderr — report the specific cause
-                await ActivityLog.append(this.projectPath, `Agent failed due to malformed output. This is likely due to requiring approval in non-interactive mode.`, 'error')
-              } else {
-                // No status in stdout either — log details
-                await ActivityLog.append(this.projectPath, `Agent output file not found at: ${this.outputFilePath}`, 'warn')
-                if (stdoutLines.length > 0 || stderrLines.length > 0) {
-                  await ActivityLog.append(this.projectPath, `Agent output (${stdoutLines.length} stdout, ${stderrLines.length} stderr lines):`, 'warn')
-                  for (const line of stdoutLines.slice(0, 5)) {
-                    await ActivityLog.append(this.projectPath, `  stdout: ${line}`, 'warn')
-                  }
-                  for (const line of stderrLines.slice(0, 5)) {
-                    await ActivityLog.append(this.projectPath, `  stderr: ${line}`, 'warn')
-                  }
-                } else {
-                  await ActivityLog.append(this.projectPath, `Agent exited silently - no stdout/stderr captured`, 'warn')
-                }
-              }
-            }
+          const statusFromJson = await readStatusJson(this.statusFilePath)
+          if (statusFromJson) {
+            this.status = statusFromJson
           }
         }
+
+        // If still no status, attempt stdout recovery
+        if (!this.status) {
+          await this._recoverFromStdout(stdoutLines, stderrLines)
+        }
+
         this._cleanup()
         if (this._completionResolve) {
           this._completionResolve({ exitCode: this.exitCode, status: this.status, exitReason: this.exitReason })
@@ -360,78 +333,29 @@ tracking purposes — do not review this file as an artifact.`
 
       this.process.on('error', async (err) => {
         this.exitReason = err.message
-        // Before resolving, check the output file one more time for PIPELINE_STATUS
+        // Read status from JSON file
         if (!this.status) {
-          try {
-            const content = await fs.readFile(this.outputFilePath, 'utf8')
-            const match = PIPELINE_STATUS_REGEX.exec(content)
-            if (match) {
-              this.status = match[0].trim().replace(/^[*_`]+|[*_`]+$/g, '').trim()
-            }
-          } catch {
-            // File not found or unreadable — check stdout for PIPELINE_STATUS
-            const stdoutContent = stdoutLines.join('\n')
-            const stdoutMatch = PIPELINE_STATUS_REGEX.exec(stdoutContent)
-            if (stdoutMatch) {
-              this.status = stdoutMatch[0].trim().replace(/^[*_`]+|[*_`]+$/g, '').trim()
-              await ActivityLog.append(this.projectPath, `PIPELINE_STATUS detected in stdout (output file not written)`, 'warn')
-              try {
-                await fs.writeFile(this.outputFilePath, stdoutContent, 'utf8')
-                await ActivityLog.append(this.projectPath, `Agent output saved to ${this.outputFilePath}`, 'info')
-              } catch (writeErr) {
-                await ActivityLog.append(this.projectPath, `Failed to save stdout to output file: ${writeErr.message}`, 'warn')
-              }
-            } else {
-              // No status in stdout — check if agent is asking clarifying questions
-              const clarifyingPatterns = [
-                /please clarify/i,
-                /let me clarify/i,
-                /could you clarify/i,
-                /can you clarify/i,
-                /please provide/i,
-                /could you provide/i,
-                /please specify/i,
-                /please confirm/i,
-                /should i/i,
-                /would you like/i,
-                /do you want/i,
-                /how many/i,
-                /which one/i,
-                /what (is|are|should|do|did|would)/i
-              ]
-              const isAskingQuestions = clarifyingPatterns.some(pattern => pattern.test(stdoutContent))
-
-              if (isAskingQuestions) {
-                await ActivityLog.append(this.projectPath, `Agent is asking clarifying questions instead of completing task`, 'error')
-                await ActivityLog.append(this.projectPath, `Agent output (${stdoutLines.length} stdout lines):`, 'error')
-                for (const line of stdoutLines.slice(0, 10)) {
-                  await ActivityLog.append(this.projectPath, `  stdout: ${line}`, 'error')
-                }
-              } else if (approvalError) {
-                await ActivityLog.append(this.projectPath, `Agent failed due to malformed output. This is likely due to requiring approval in non-interactive mode.`, 'error')
-              } else {
-                await ActivityLog.append(this.projectPath, `Agent process error: ${err.message}`, 'error')
-                await ActivityLog.append(this.projectPath, `Agent output file not found at: ${this.outputFilePath}`, 'warn')
-                if (stderrLines.length > 0) {
-                  await ActivityLog.append(this.projectPath, `Agent stderr output (${stderrLines.length} lines):`, 'warn')
-                  for (const line of stderrLines.slice(0, 10)) {
-                    await ActivityLog.append(this.projectPath, `  ${line}`, 'warn')
-                  }
-                }
-              }
-            }
+          const statusFromJson = await readStatusJson(this.statusFilePath)
+          if (statusFromJson) {
+            this.status = statusFromJson
           }
         }
+
+        // If still no status, attempt stdout recovery
+        if (!this.status) {
+          await this._recoverFromStdout(stdoutLines, stderrLines)
+        }
+
         this._cleanup()
         if (this._completionResolve) {
           this._completionResolve({ exitCode: this.exitCode, status: this.status, exitReason: this.exitReason })
         }
       })
 
-      // Start polling the output file for PIPELINE_STATUS
-      this.poller = createPoller(this.outputFilePath, PIPELINE_STATUS_REGEX, 2000)
+      // Start polling the status JSON file
+      this.poller = createPoller(this.statusFilePath, null, 2000)
       this.poller.on('match', (fullMatch) => {
-        this.status = fullMatch.trim().replace(/^[*_`]+|[*_`]+$/g, '').trim()
+        this.status = fullMatch.trim()
         ActivityLog.append(this.projectPath, `Poller detected status: ${this.status}`, 'info')
         this._cleanup()
         if (this._completionResolve) {
@@ -456,6 +380,136 @@ tracking purposes — do not review this file as an artifact.`
       return { ok: true }
     } catch (e) {
       return { error: e.message }
+    }
+  }
+
+  /**
+   * Attempt to recover when an agent exits without writing its output or status files.
+   *
+   * Strategy:
+   * 1. If stdout has substantive content (>= 8 lines), write it to the output file
+   *    and synthesise a status JSON from it. This handles the Qwen3-Coder pattern
+   *    of printing output to terminal instead of writing files.
+   * 2. If stdout is empty or thin (< 8 lines), spawn one retry with a short focused
+   *    prompt. The retry reads the same source files as the original run.
+   * 3. If the retry also produces no files, set this.status to ERROR and stop.
+   *
+   * @param {string[]} stdoutLines - Lines captured from the agent's stdout
+   * @param {string[]} stderrLines - Lines captured from the agent's stderr
+   */
+  async _recoverFromStdout(stdoutLines, stderrLines) {
+    const STDOUT_VIABLE_THRESHOLD = 8
+
+    const viableLines = stdoutLines.filter(l => l.trim().length > 0)
+
+    if (viableLines.length >= STDOUT_VIABLE_THRESHOLD) {
+      // Stdout has substantive content — recover by writing it to the output file
+      await ActivityLog.append(this.projectPath, `Stdout recovery: ${viableLines.length} lines captured, writing to output file`, 'warn')
+
+      const stdoutContent = viableLines.join('\n')
+
+      try {
+        await fs.writeFile(this.outputFilePath, stdoutContent, 'utf8')
+        await ActivityLog.append(this.projectPath, `Stdout recovery: output file written to ${this.outputFilePath}`, 'info')
+      } catch (writeErr) {
+        await ActivityLog.append(this.projectPath, `Stdout recovery: failed to write output file — ${writeErr.message}`, 'error')
+        this.status = 'PIPELINE_STATUS: ERROR | REASON: stdout recovery failed to write output file'
+        return
+      }
+
+      // Synthesise status from stdout content
+      // If stdout mentions error keywords, treat as error. Otherwise DONE.
+      const lower = stdoutContent.toLowerCase()
+      const hasError = /\berror\b|\bfailed\b|\bfailure\b|\bcannot\b|\bunable\b/.test(lower)
+      const synthesisedStatus = hasError
+        ? 'PIPELINE_STATUS: ERROR | REASON: agent printed errors to stdout instead of writing files'
+        : 'PIPELINE_STATUS: DONE | ISSUES: false'
+
+      // Write the status JSON too
+      try {
+        const statusFileName = path.basename(this.outputFilePath, '.md') + '-status.json'
+        const statusFilePath = path.join(path.dirname(this.outputFilePath), statusFileName)
+        const statusObj = hasError
+          ? { status: 'ERROR', reason: 'agent printed errors to stdout instead of writing files' }
+          : { status: 'DONE', issues: false }
+        await fs.writeFile(statusFilePath, JSON.stringify(statusObj), 'utf8')
+        await ActivityLog.append(this.projectPath, `Stdout recovery: status JSON written`, 'info')
+      } catch (statusErr) {
+        await ActivityLog.append(this.projectPath, `Stdout recovery: failed to write status JSON — ${statusErr.message}`, 'warn')
+      }
+
+      this.status = synthesisedStatus
+      return
+    }
+
+    // Stdout is empty or thin — trigger one retry
+    await ActivityLog.append(this.projectPath, `Stdout recovery: insufficient stdout (${viableLines.length} lines), triggering retry`, 'warn')
+    await this._retryWriteFiles()
+  }
+
+  /**
+   * Spawn one retry when the agent exited without writing its output file.
+   * The retry prompt is short and task-specific: re-read the source files,
+   * produce the output, write it. No full task description is repeated.
+   *
+   * If the retry succeeds, this.status is set from the status JSON.
+   * If the retry fails, this.status is set to ERROR.
+   */
+  async _retryWriteFiles() {
+    const outputFileName = path.basename(this.outputFilePath)
+    const statusFileName = path.basename(this.outputFilePath, '.md') + '-status.json'
+    const outputRelativePath = `Context/${outputFileName}`
+    const statusRelativePath = `Context/${statusFileName}`
+
+    // Build the list of source files this agent reads, same as spawn()
+    const readList = (this.agent.reads || []).map(f => {
+      if (f.startsWith('Context/')) return f
+      return `Context/${f}`
+    }).join(', ')
+
+    const retryPrompt = `Your previous run ended without writing the required output files. Complete the task now.
+
+Read these files for context: ${readList || 'none'}
+
+Write your output to \`${outputRelativePath}\` using your file writing tools.
+Write your status to \`${statusRelativePath}\` using your file writing tools.
+
+Status file must be valid JSON only:
+{"status":"DONE","issues":false}
+{"status":"DONE","issues":true}
+{"status":"ERROR","reason":"brief description"}
+
+Do not print output to the terminal. Write the files.`
+
+    await ActivityLog.append(this.projectPath, `Retry: spawning recovery run for ${this.agent.name}`, 'warn')
+
+    // Spawn a fresh Qwen process. Reuse _spawnQwen() with the retry prompt.
+    // _cleanup() has already been called before this method runs — reset the
+    // completion promise so waitForCompletion() works for the retry.
+    this._completionPromise = new Promise((resolve) => {
+      this._completionResolve = resolve
+    })
+
+    const spawnResult = await this._spawnQwen(retryPrompt)
+    if (spawnResult.error) {
+      await ActivityLog.append(this.projectPath, `Retry: spawn failed — ${spawnResult.error}`, 'error')
+      this.status = 'PIPELINE_STATUS: ERROR | REASON: retry spawn failed'
+      return
+    }
+
+    // Wait for the retry to complete
+    const retryResult = await this._completionPromise
+
+    // Check if the retry wrote the status JSON
+    const statusFilePath = path.join(path.dirname(this.outputFilePath), statusFileName)
+    const retryStatus = await readStatusJson(statusFilePath)
+
+    if (retryStatus) {
+      this.status = retryStatus
+      await ActivityLog.append(this.projectPath, `Retry: succeeded — ${retryStatus}`, 'info')
+    } else {
+      this.status = 'PIPELINE_STATUS: ERROR | REASON: retry completed but no status file written'
+      await ActivityLog.append(this.projectPath, `Retry: failed — no status file after retry`, 'error')
     }
   }
 
@@ -702,7 +756,7 @@ tracking purposes — do not review this file as an artifact.`
       'node',
       [
         app.isPackaged
-          ? path.join(process.resourcesPath, 'app', 'main', 'mcp', 'QaMcpServer.js')
+          ? path.join(process.resourcesPath, 'app.asar.unpacked', 'main', 'mcp', 'QaMcpServer.js')
           : path.join(__dirname, '../mcp/QaMcpServer.js'),
         '--project-path', this.projectPath,
         '--port', String(port),
@@ -819,7 +873,17 @@ tracking purposes — do not review this file as an artifact.`
       await this.qaMcpRunner.connect()
 
       // 7. Build the prompt (same logic as spawn()).
-      const promptParts = [this.agent.prompt]
+      // Derive file names once, use throughout _spawnQaAgent()
+      const outputFileName = path.basename(this.outputFilePath)
+      const statusFileName = path.basename(this.outputFilePath, '.md') + '-status.json'
+      const outputRelativePath = `Context/${outputFileName}`
+      const statusRelativePath = `Context/${statusFileName}`
+      this.statusFilePath = path.join(path.dirname(this.outputFilePath), statusFileName)
+
+      // File-writing anchor injected at the very beginning of the prompt (attention primacy)
+      const fileAnchor = `CRITICAL: When your task is complete, you must write two files using your file writing tools — not print to terminal:\n1. Your output to \`${outputRelativePath}\`\n2. Your status to \`${statusRelativePath}\` as JSON: {"status":"DONE","issues":false} or {"status":"ERROR","reason":"..."}\n\n`
+
+      const promptParts = [fileAnchor, this.agent.prompt]
       for (const readFile of this.agent.reads) {
         let fullPath
         if (readFile.startsWith('Context/')) {
@@ -837,37 +901,19 @@ tracking purposes — do not review this file as an artifact.`
         }
       }
 
-      // Get output file name for injection
-      const outputFileName = path.basename(this.outputFilePath)
-
       // Inject role-specific instructions
       if (this.agent.role === 'qa') {
-        // QA agent has a two-file workflow: report + status
-        const qaPrompt = `\n\nQA AGENT FILE WORKFLOW:
-You must write TWO files:
-1. Your defect report to \`Context/qa-report.md\` — this is the full report with screenshots and findings.
-2. Your status line to \`Context/qa.md\` — this is ONLY the PIPELINE_STATUS line (nothing else).
+        const qaStatusFileName = path.basename(this.outputFilePath, '.md') + '-status.json'
+        const qaStatusRelativePath = `Context/${qaStatusFileName}`
+        const qaPrompt = `\n\nQA FILE WORKFLOW:
+Write your defect report to \`Context/qa-report.md\`.
+Write your status to \`${qaStatusRelativePath}\` — valid JSON only, nothing else.
 
-Write the report first (Step 4 in your spec). After the report is complete, write the status line to \`Context/qa.md\` (Step 5).
+Determine ISSUES solely from the count returned by \`qa_get_flagged\`:
+- Count > 0: {"status":"DONE","issues":true}
+- Count = 0: {"status":"DONE","issues":false}
 
-**CRITICAL: Determining ISSUES status**
-The \`ISSUES\` value is determined SOLELY by the flagged item count from \`qa_get_flagged\`:
-- If \`qa_get_flagged\` returns ANY items (count > 0): \`ISSUES\` MUST be \`true\`
-- If \`qa_get_flagged\` returns ZERO items: \`ISSUES\` is \`false\` (unless you see visible defects in screenshots)
-
-Do NOT consider whether the user clicked "Done" or "All Good" — only the flagged count matters.
-The user clicking "Done" only means "I am finished testing", NOT "everything is fine".
-
-The status line in \`Context/qa.md\` must be exactly one of the following two lines,
-copied character-for-character with no formatting, no backticks, no bold, no asterisks:
-
-PIPELINE_STATUS: DONE | ISSUES: true
-PIPELINE_STATUS: DONE | ISSUES: false
-
-- Use PIPELINE_STATUS: DONE | ISSUES: true if qa_get_flagged returned any items (count > 0)
-- Use PIPELINE_STATUS: DONE | ISSUES: false if qa_get_flagged returned ZERO items AND no visible defects
-
-Do not write anything else to \`Context/qa.md\`. Do not write the report to \`Context/qa.md\`.`
+Write the status file last.`
         promptParts.push(qaPrompt)
       } else if (this.agent.role === 'producer') {
         const outputFolderPrompt = `\n\nOUTPUT FOLDER INSTRUCTIONS:
@@ -899,8 +945,20 @@ tracking purposes — do not review this file as an artifact.`
         promptParts.push(reviewerPrompt)
       } else {
         // Default footer for other agents
-        const outputRelativePath = `Context/${outputFileName}`
-        const footerPrompt = `\n\nYou must write your progress tracking file to \`${outputRelativePath}\`. Use your file writing tools to do this — do not print your output to the terminal.\n\nAll other artifacts you create (images, text files, binaries, or any other deliverables) must be written to the Output/ subdirectory as specified above.\n\nThe very last line of the file you write must be exactly one of the following three lines,\ncopied character-for-character with no formatting, no backticks, no bold, no asterisks,\nand nothing after it:\n\nPIPELINE_STATUS: DONE | ISSUES: false\nPIPELINE_STATUS: DONE | ISSUES: true\nPIPELINE_STATUS: ERROR | REASON: <brief description>\n\nRules for this line:\n- It must be the very last line in the file.\n- Do not wrap it in backticks, asterisks, bold, or any other markdown formatting.\n- Do not add a period, dash, comment, or any other text after it.\n- Do not print it to the terminal. Write it to the file.`
+        const footerPrompt = `\n\nWhen you finish your task, write your progress notes to \`${outputRelativePath}\` as normal.
+
+You must also write a separate status file to \`${statusRelativePath}\`. This file must contain only valid JSON — nothing else. Use one of these exact structures:
+
+If completed with no issues:
+{"status":"DONE","issues":false}
+
+If completed but issues were found:
+{"status":"DONE","issues":true}
+
+If an error occurred:
+{"status":"ERROR","reason":"brief description"}
+
+Write the status file last, after your progress notes are complete.`
         promptParts.push(footerPrompt)
       }
 

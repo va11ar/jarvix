@@ -529,7 +529,7 @@ async function copyBundledAgentsToLibrary() {
 
     // If not found, try the resources/app path (for packaged app)
     if (!fsSync.existsSync(bundledAgentsDir)) {
-      bundledAgentsDir = path.join(process.resourcesPath, 'app', 'agent-samples')
+      bundledAgentsDir = path.join(process.resourcesPath, 'app.asar.unpacked', 'agent-samples')
       console.log('[AgentLibrary] bundledAgentsDir (prod path):', bundledAgentsDir)
     }
 

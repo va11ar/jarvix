@@ -1,6 +1,9 @@
 module.exports = {
   packagerConfig: {
-    asar: false,
+    asar: {
+      unpack: '**/QaMcpServer.js',
+      unpackDir: '**/agent-samples'
+    },
     ignore: [
       /^\/src/,
       /^\/\.git/,

@@ -336,10 +336,19 @@ class PipelineRunner {
       // Get output file path
       const outputFileName = path.basename(agent.filePath, '.md') + '.md'
       const outputFilePath = path.join(this.currentProjectPath, 'Context', outputFileName)
+      const statusFileName = path.basename(agent.filePath, '.md') + '-status.json'
+      const statusFilePath = path.join(this.currentProjectPath, 'Context', statusFileName)
 
       // Clear output file before spawning (important for review loops - prevents stale status detection)
       try {
         await require('fs/promises').unlink(outputFilePath)
+      } catch {
+        // File doesn't exist - that's fine
+      }
+
+      // Clear status file before spawning
+      try {
+        await require('fs/promises').unlink(statusFilePath)
       } catch {
         // File doesn't exist - that's fine
       }
