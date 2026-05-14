@@ -38,6 +38,6 @@ The project has potential but it needs far more resources than I can give it -- 
 Note:
 
 * Jarvix/Wazear is discontinued, if you want to continue working on it, feel free to fork and modify what you want. Just credit me somewhere. 
-
+* This code was written 100% by AI.
 
 
